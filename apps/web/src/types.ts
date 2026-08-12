@@ -6,6 +6,8 @@ import type {
   CanvasVideoPreviewSourceRequest,
   CanvasVideoPreviewSourceResponse,
   ModelArtifactProvenanceLookup,
+  ProjectFileSourceResolution,
+  ProjectPathInspection,
   PhotoshopStateView,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasTextPreviewSourceResult,
@@ -73,7 +75,18 @@ export interface FloatingTextEditorWindowState {
 }
 
 export interface WorkbenchActions {
-  lookupModelArtifactProvenance: (input: { projectRelativePath: string }) => Promise<ModelArtifactProvenanceLookup>;
+  lookupModelArtifactProvenance: (
+    input: { projectRelativePath: string },
+    signal?: AbortSignal
+  ) => Promise<ModelArtifactProvenanceLookup>;
+  inspectProjectPath: (
+    input: { projectRelativePath: string },
+    signal?: AbortSignal
+  ) => Promise<ProjectPathInspection>;
+  resolveProjectFileSource: (
+    input: { projectRelativePath: string; sourceToken: string },
+    signal?: AbortSignal
+  ) => Promise<ProjectFileSourceResolution>;
   readProjectTextFile: (projectRelativePath: string) => Promise<WorkbenchProjectTextFile>;
   resolveCanvasSources: (input: CanvasSourceResolutionRequest) => Promise<CanvasSourceResolutionResponse>;
   writeProjectTextFile: (input: WriteProjectTextFileInput) => Promise<WorkbenchProjectTextFileWriteResult>;

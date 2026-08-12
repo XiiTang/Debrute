@@ -63,7 +63,7 @@ impl ProjectNodeAdapter for VideoTextTrackNodeAdapter {
     }
 }
 
-fn resolving_source_target(snapshot: &ProjectSnapshot, path: &str) -> CanvasSourceTarget {
+fn resolving_source_target(snapshot: &ProjectSnapshot, path: &str) -> ProjectFileSourceTarget {
     let CanvasWorkspaceSnapshot::Available {
         canvas_resources, ..
     } = &snapshot.canvas_workspace
@@ -76,7 +76,7 @@ fn resolving_source_target(snapshot: &ProjectSnapshot, path: &str) -> CanvasSour
 fn resolving_source_target_in_view(
     resources: &CanvasResourceView,
     path: &str,
-) -> CanvasSourceTarget {
+) -> ProjectFileSourceTarget {
     let resource = resources
         .resources
         .iter()
@@ -88,7 +88,7 @@ fn resolving_source_target_in_view(
     let CanvasNodeAvailability::Resolving { source_token, .. } = availability.as_ref() else {
         panic!("expected a resolving Canvas file resource");
     };
-    CanvasSourceTarget {
+    ProjectFileSourceTarget {
         project_relative_path: relative(path),
         source_token: source_token.clone(),
     }

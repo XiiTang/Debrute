@@ -242,7 +242,7 @@ function PhotoshopSubmenu({
 }
 
 function contextMenuIcon(command: ProjectPathCommand): React.ReactElement {
-  if (command === 'show-details') {
+  if (command === 'inspect') {
     return <Info size={14} />;
   }
   if (command === 'reset-auto-layout') {

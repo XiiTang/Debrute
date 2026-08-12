@@ -371,7 +371,8 @@ function ControllerProbe({
     activities: {
       report: (input) => notify(input.kind)
     },
-    i18n: createI18n('en')
+    i18n: createI18n('en'),
+    onInspectionSelectionChange: () => undefined
   });
   useEffect(() => onValue(controller, scope), [controller, onValue, scope]);
   return null;

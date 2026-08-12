@@ -13,14 +13,14 @@ use uuid::Uuid;
 use super::{
     AdmittedProjectPathEntry, CanonicalProjectRoot, CanvasFeedbackArtifacts,
     CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasSourceResolutionView,
-    CanvasSourceTarget, CanvasStatePatch, CanvasStatePatchOutcome, ProjectChange,
-    ProjectDirectoryPath, ProjectError, ProjectEvent, ProjectNativeShellService,
-    ProjectNodeAdapter, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathKind,
-    ProjectPathOperationStatus, ProjectRelativePath, ProjectService, ProjectSnapshot,
-    ProjectSourceDigestResolver, ProjectSourceLease, ProjectSyncSnapshot, ProjectTextFile,
-    ProjectUploadEntry, UpdateCanvasFeedbackInput, copy_project_paths, create_project_path,
-    delete_project_paths, import_local_project_paths, import_upload_project_entries,
-    move_project_paths, rename_project_path,
+    CanvasStatePatch, CanvasStatePatchOutcome, ProjectChange, ProjectDirectoryPath, ProjectError,
+    ProjectEvent, ProjectFileSourceTarget, ProjectNativeShellService, ProjectNodeAdapter,
+    ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathInspection, ProjectPathKind,
+    ProjectPathOperationStatus, ProjectRelativePath, ProjectResolvedFileSource, ProjectService,
+    ProjectSnapshot, ProjectSourceDigestResolver, ProjectSourceLease, ProjectSyncSnapshot,
+    ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput, copy_project_paths,
+    create_project_path, delete_project_paths, import_local_project_paths,
+    import_upload_project_entries, move_project_paths, rename_project_path,
     watcher::{
         ProjectFileWatcher, ProjectWatchBackendFactory, ProjectWatchPath, ProjectWatchSignal,
     },
@@ -790,7 +790,7 @@ impl ProjectSession {
     /// Returns a typed error when a target is stale, hidden, or unreadable.
     pub(crate) fn resolve_canvas_sources(
         &self,
-        targets: &[CanvasSourceTarget],
+        targets: &[ProjectFileSourceTarget],
         source_digests: &ProjectSourceDigestResolver,
     ) -> Result<CanvasSourceResolutionView, ProjectError> {
         let mut state = self.open_state()?;
@@ -799,7 +799,26 @@ impl ProjectSession {
             .resolve_canvas_sources(targets, source_digests)
     }
 
-    pub(crate) fn canvas_source_lease(
+    pub(crate) fn inspect_project_path(
+        &self,
+        project_relative_path: &ProjectDirectoryPath,
+    ) -> Result<ProjectPathInspection, ProjectError> {
+        let mut state = self.open_state()?;
+        state.service.inspect_project_path(project_relative_path)
+    }
+
+    pub(crate) fn resolve_project_file_source(
+        &self,
+        target: &ProjectFileSourceTarget,
+        source_digests: &ProjectSourceDigestResolver,
+    ) -> Result<ProjectResolvedFileSource, ProjectError> {
+        let mut state = self.open_state()?;
+        state
+            .service
+            .resolve_project_file_source(target, source_digests)
+    }
+
+    pub(crate) fn project_file_source_lease(
         &self,
         project_relative_path: &ProjectRelativePath,
         expected_revision: &str,
@@ -807,7 +826,7 @@ impl ProjectSession {
         let state = self.open_state()?;
         state
             .service
-            .canvas_source_lease(project_relative_path, expected_revision)
+            .project_file_source_lease(project_relative_path, expected_revision)
     }
 
     /// Captures the current public session summary.

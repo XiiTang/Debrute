@@ -82,6 +82,7 @@ export interface ProjectExplorerControllerInput {
   canvasRuntime: CanvasEditorRuntime | undefined;
   activities: WorkbenchActivityNoticeReporter;
   i18n: WorkbenchI18n;
+  onInspectionSelectionChange(selection: ProjectTreeSelectionState): void;
 }
 
 export function useProjectExplorerController(
@@ -89,6 +90,8 @@ export function useProjectExplorerController(
 ): ProjectExplorerController {
   const { commandEffects } = input;
   const [selection, setSelectionState] = useState<ProjectTreeSelectionState>(() => createEmptyProjectTreeSelection());
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
   const [fileClipboard, setFileClipboard] = useState<WorkbenchFileClipboard>();
   const [inlineEdit, setInlineEdit] = useState<ProjectTreeInlineEditState>();
   const editIntentTokenRef = useRef(0);
@@ -117,9 +120,18 @@ export function useProjectExplorerController(
     };
   }, []);
 
-  const setSelection = useCallback((nextSelection: ProjectTreeSelectionState) => {
+  const commitSelection = useCallback((
+    value: ProjectTreeSelectionState | ((current: ProjectTreeSelectionState) => ProjectTreeSelectionState)
+  ) => {
+    const nextSelection = typeof value === 'function' ? value(selectionRef.current) : value;
+    selectionRef.current = nextSelection;
+    input.onInspectionSelectionChange(nextSelection);
     setSelectionState(nextSelection);
-  }, []);
+  }, [input.onInspectionSelectionChange]);
+
+  const setSelection = useCallback((nextSelection: ProjectTreeSelectionState) => {
+    commitSelection(nextSelection);
+  }, [commitSelection]);
 
   const requestDirectory = useCallback(async (
     projectRelativeDirectory: string,
@@ -280,7 +292,7 @@ export function useProjectExplorerController(
       if (!scope.isCurrent(result.bindingId)) {
         return;
       }
-      setSelectionState(projectTreeSelectionFromPaths([result.projectRelativePath]));
+      commitSelection(projectTreeSelectionFromPaths([result.projectRelativePath]));
       if (
         current.kind === 'renaming'
         && canvasRuntime
@@ -303,7 +315,7 @@ export function useProjectExplorerController(
         setInlineEdit({ ...current, submitting: false, error: errorMessage(error) });
       }
     }
-  }, [commandEffects, inlineEdit, input.canvasRuntime, input.i18n, requestDirectory]);
+  }, [commandEffects, commitSelection, inlineEdit, input.canvasRuntime, input.i18n, requestDirectory]);
 
   const cancelEdit = useCallback(() => {
     editIntentTokenRef.current += 1;
@@ -322,9 +334,9 @@ export function useProjectExplorerController(
     if (!scope.isCurrent(result.bindingId)) {
       return false;
     }
-    setSelectionState(projectTreeSelectionFromPaths(batchResultSelectionPaths(result.results)));
+    commitSelection(projectTreeSelectionFromPaths(batchResultSelectionPaths(result.results)));
     return true;
-  }, []);
+  }, [commitSelection]);
 
   const copyPaths = useCallback(async (copyInput: {
     entries: ProjectPathEntry[];
@@ -415,7 +427,7 @@ export function useProjectExplorerController(
       ));
     }
     const existingPaths = new Set(snapshot.projectTree.map((entry) => entry.projectRelativePath));
-    setSelectionState((current) => {
+    commitSelection((current) => {
       if (!current.selectedPaths.some((path) => deletedPaths.some((deletedPath) => isPathInside(path, deletedPath)))) {
         return current;
       }
@@ -428,7 +440,7 @@ export function useProjectExplorerController(
       (clipboard, deletedPath) => clearClipboardAfterDeletedPath(clipboard, deletedPath),
       current
     ));
-  }, [input.canvasRuntime]);
+  }, [commitSelection, input.canvasRuntime]);
 
   const deleteEntries = useCallback((
     scope: AcceptedProjectPathCommandScope,

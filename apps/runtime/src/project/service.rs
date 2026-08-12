@@ -6,49 +6,30 @@ use std::{
     io::{Read, Seek, SeekFrom},
     path::Path,
     sync::Arc,
-    time::SystemTime,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use super::{
     CanonicalProjectRoot, CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument,
     CanvasFeedbackEntry, CanvasImageDimensions, CanvasMediaKind, CanvasNodeAvailability,
     CanvasNodeStateChange, CanvasResolvedSource, CanvasResource, CanvasResourceView,
-    CanvasSourceResolutionView, CanvasSourceTarget, CanvasState, CanvasStateChange,
-    CanvasStatePatch, CanvasStatePatchOutcome, CanvasVideoTextTrack, CanvasWorkspaceDocument,
+    CanvasSourceResolutionView, CanvasState, CanvasStateChange, CanvasStatePatch,
+    CanvasStatePatchOutcome, CanvasVideoTextTrack, CanvasWorkspaceDocument,
     CanvasWorkspaceSnapshot, CanvasWorkspaceStore, CanvasWorkspaceUnavailable, ProjectCapabilityFs,
     ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity, ProjectDirectoryPath,
-    ProjectError, ProjectHealthSummary, ProjectPathKind, ProjectRelativePath, ProjectSnapshot,
-    ProjectSourceDigestResolver, ProjectTree, ProjectTreeChange, ProjectTreeEntry,
-    UpdateCanvasFeedbackInput, apply_canvas_state_patch, canvas_media_kind_from_path,
-    canvas_path_is_visible, normalize_feedback_path, open_no_symlink_existing_project_file,
-    project_content_hash, project_content_type, project_media_kind_from_content_type,
-    project_text_file_type_for_path, prune_canvas_state_path, read_canvas_feedback_state,
-    resolve_no_symlink_existing_project_path, rewrite_canvas_state_path,
-    update_canvas_feedback_document, visible_canvas_entries, write_canvas_feedback_document,
+    ProjectError, ProjectFileSourceTarget, ProjectHealthSummary, ProjectImageDimensions,
+    ProjectPathInspection, ProjectPathInspectionMedia, ProjectPathKind, ProjectRelativePath,
+    ProjectResolvedFileSource, ProjectSnapshot, ProjectSourceDigestResolver, ProjectTree,
+    ProjectTreeChange, ProjectTreeEntry, UpdateCanvasFeedbackInput, apply_canvas_state_patch,
+    canvas_media_kind_from_path, canvas_path_is_visible, normalize_feedback_path,
+    open_no_symlink_existing_project_file, project_content_hash, project_content_type,
+    project_media_kind_from_content_type, project_text_file_type_for_path, prune_canvas_state_path,
+    read_canvas_feedback_state, resolve_no_symlink_existing_project_path,
+    rewrite_canvas_state_path, update_canvas_feedback_document, visible_canvas_entries,
+    write_canvas_feedback_document,
 };
 
 type CanvasNodeAdapterData = Option<CanvasImagePreviewInfo>;
-
-fn resolved_canvas_source(
-    source_token: String,
-    resource: &CanvasResource,
-    video_text_tracks: Option<Vec<CanvasVideoTextTrack>>,
-) -> CanvasResolvedSource {
-    let CanvasResource::File {
-        project_relative_path,
-        availability,
-        ..
-    } = resource
-    else {
-        unreachable!("a resolved Canvas source is a file");
-    };
-    CanvasResolvedSource {
-        source_token,
-        project_relative_path: project_relative_path.clone(),
-        availability: availability.as_ref().clone(),
-        video_text_tracks,
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanvasImagePreviewInfo {
@@ -57,13 +38,64 @@ pub struct CanvasImagePreviewInfo {
 }
 
 #[derive(Clone)]
-struct CachedCanvasFileInspection {
+struct CachedProjectFileSource {
     identity: debrute_native_fs::PathIdentity,
     size: u64,
     modified: SystemTime,
     source_token: String,
-    resource: CanvasResource,
-    video_text_tracks: Option<Vec<CanvasVideoTextTrack>>,
+    revision: Option<String>,
+}
+
+#[derive(Clone)]
+enum CachedCanvasFileDescription {
+    Ready {
+        media_kind: CanvasMediaKind,
+        mime_type: String,
+        canvas_image_previewable: Option<bool>,
+        canvas_image_preview_source_width: Option<u64>,
+        image_dimensions: Option<CanvasImageDimensions>,
+        text_language: Option<String>,
+        resolution_error: Option<String>,
+        video_text_tracks: Option<Vec<CanvasVideoTextTrack>>,
+    },
+    Unreadable {
+        media_kind: CanvasMediaKind,
+        message: String,
+    },
+}
+
+impl CachedCanvasFileDescription {
+    fn media_kind(&self) -> CanvasMediaKind {
+        match self {
+            Self::Ready { media_kind, .. } | Self::Unreadable { media_kind, .. } => *media_kind,
+        }
+    }
+
+    fn needs_video_text_tracks(&self) -> bool {
+        matches!(
+            self,
+            Self::Ready {
+                media_kind: CanvasMediaKind::Video,
+                resolution_error: None,
+                video_text_tracks: None,
+                ..
+            }
+        )
+    }
+
+    fn video_text_tracks(&self) -> Option<Vec<CanvasVideoTextTrack>> {
+        match self {
+            Self::Ready {
+                video_text_tracks, ..
+            } => video_text_tracks.clone(),
+            Self::Unreadable { .. } => None,
+        }
+    }
+}
+
+enum ProjectFileSourceResolution {
+    Available(ProjectResolvedFileSource),
+    Unreadable(String),
 }
 
 #[derive(Debug)]
@@ -130,8 +162,11 @@ impl ProjectSourceLease {
             Ok(())
         } else {
             Err(ProjectError::service(
-                "canvas_source_changed",
-                format!("Canvas source changed: {}", self.project_relative_path),
+                "project_file_source_changed",
+                format!(
+                    "Project file source changed: {}",
+                    self.project_relative_path
+                ),
             ))
         }
     }
@@ -145,7 +180,8 @@ pub(crate) struct SnapshotLoadCheckpoint {
     feedback_hash: Option<String>,
     path_state_diagnostic: Option<ProjectDiagnostic>,
     project_tree: ProjectTree,
-    inspection_cache: HashMap<String, CachedCanvasFileInspection>,
+    file_source_cache: HashMap<String, CachedProjectFileSource>,
+    canvas_file_cache: HashMap<String, CachedCanvasFileDescription>,
 }
 
 pub trait ProjectNodeAdapter: Send + Sync {
@@ -202,7 +238,8 @@ pub struct ProjectService {
     feedback_render_diagnostics: HashMap<String, ProjectDiagnostic>,
     path_state_diagnostic: Option<ProjectDiagnostic>,
     project_tree: ProjectTree,
-    inspection_cache: HashMap<String, CachedCanvasFileInspection>,
+    file_source_cache: HashMap<String, CachedProjectFileSource>,
+    canvas_file_cache: HashMap<String, CachedCanvasFileDescription>,
 }
 
 impl ProjectService {
@@ -269,7 +306,8 @@ impl ProjectService {
             feedback_render_diagnostics: HashMap::new(),
             path_state_diagnostic: None,
             project_tree,
-            inspection_cache: HashMap::new(),
+            file_source_cache: HashMap::new(),
+            canvas_file_cache: HashMap::new(),
         })
     }
 
@@ -848,7 +886,15 @@ impl ProjectService {
         diagnostics.extend(self.feedback_render_diagnostics.values().cloned());
         diagnostics.extend(self.path_state_diagnostic.iter().cloned());
         let project_tree = self.project_tree.ordered_entries();
-        self.inspection_cache.retain(|path, _| {
+        self.file_source_cache.retain(|path, _| {
+            !snapshot_invalidated_paths
+                .iter()
+                .any(|invalidated| super::project_path_is_same_or_descendant(path, invalidated))
+                && project_tree
+                    .iter()
+                    .any(|entry| entry.project_relative_path == *path)
+        });
+        self.canvas_file_cache.retain(|path, _| {
             !snapshot_invalidated_paths
                 .iter()
                 .any(|invalidated| super::project_path_is_same_or_descendant(path, invalidated))
@@ -862,24 +908,16 @@ impl ProjectService {
                 let visible_videos_needing_player_resolution = visible_entries
                     .iter()
                     .filter_map(|entry| {
-                        let cached = self.inspection_cache.get(&entry.project_relative_path)?;
-                        (cached.video_text_tracks.is_none()
-                            && matches!(
-                                &cached.resource,
-                                CanvasResource::File {
-                                    media_kind: CanvasMediaKind::Video,
-                                    availability,
-                                    ..
-                                } if matches!(
-                                    availability.as_ref(),
-                                    CanvasNodeAvailability::Available { .. }
-                                )
-                            ))
-                        .then_some(entry.project_relative_path.clone())
+                        let source = self.file_source_cache.get(&entry.project_relative_path)?;
+                        let description =
+                            self.canvas_file_cache.get(&entry.project_relative_path)?;
+                        (source.revision.is_some() && description.needs_video_text_tracks())
+                            .then_some(entry.project_relative_path.clone())
                     })
                     .collect::<Vec<_>>();
                 for path in visible_videos_needing_player_resolution {
-                    self.inspection_cache.remove(&path);
+                    self.file_source_cache.remove(&path);
+                    self.canvas_file_cache.remove(&path);
                 }
                 let resources = visible_entries
                     .iter()
@@ -936,11 +974,20 @@ impl ProjectService {
             };
         }
         let media_kind = canvas_media_kind_from_path(&entry.project_relative_path);
-        let relative = ProjectRelativePath::parse(&entry.project_relative_path);
-        let mut file = match relative
-            .and_then(|relative| open_no_symlink_existing_project_file(&self.root, &relative))
-        {
-            Ok(file) => file,
+        let relative = match ProjectRelativePath::parse(&entry.project_relative_path) {
+            Ok(relative) => relative,
+            Err(error) => {
+                return unavailable_canvas_file_resource(
+                    entry,
+                    media_kind,
+                    CanvasNodeAvailability::Unreadable {
+                        message: error.to_string(),
+                    },
+                );
+            }
+        };
+        let (mut file, _, source) = match self.open_project_file_source(&relative) {
+            Ok(opened) => opened,
             Err(error) => {
                 let availability = if matches!(
                     &error,
@@ -957,164 +1004,105 @@ impl ProjectService {
                 return unavailable_canvas_file_resource(entry, media_kind, availability);
             }
         };
-        let metadata = match file.metadata() {
-            Ok(metadata) => metadata,
-            Err(error) => {
-                return unavailable_canvas_file_resource(
-                    entry,
-                    media_kind,
-                    CanvasNodeAvailability::Unreadable {
-                        message: error.to_string(),
-                    },
-                );
-            }
-        };
-        let identity = match debrute_native_fs::file_identity(&file) {
-            Ok(identity) => identity,
-            Err(error) => {
-                return unavailable_canvas_file_resource(
-                    entry,
-                    media_kind,
-                    CanvasNodeAvailability::Unreadable {
-                        message: error.to_string(),
-                    },
-                );
-            }
-        };
-        let modified = match metadata.modified() {
-            Ok(modified) => modified,
-            Err(error) => {
-                return unavailable_canvas_file_resource(
-                    entry,
-                    media_kind,
-                    CanvasNodeAvailability::Unreadable {
-                        message: error.to_string(),
-                    },
-                );
-            }
-        };
-        if let Some(cached) = self.inspection_cache.get(&entry.project_relative_path)
+        let description = self
+            .canvas_file_cache
+            .get(&entry.project_relative_path)
+            .cloned()
+            .unwrap_or_else(|| {
+                let description = self.describe_canvas_file(entry, &mut file);
+                self.canvas_file_cache
+                    .insert(entry.project_relative_path.clone(), description.clone());
+                description
+            });
+        canvas_file_resource(entry, &source, &description)
+    }
+
+    fn open_project_file_source(
+        &mut self,
+        project_relative_path: &ProjectRelativePath,
+    ) -> Result<(fs::File, fs::Metadata, CachedProjectFileSource), ProjectError> {
+        let path = project_relative_path.as_str();
+        let file = open_no_symlink_existing_project_file(&self.root, project_relative_path)?;
+        let metadata = file.metadata()?;
+        let identity = debrute_native_fs::file_identity(&file)?;
+        let modified = metadata.modified()?;
+        if let Some(cached) = self.file_source_cache.get(path)
             && cached.identity == identity
             && cached.size == metadata.len()
             && cached.modified == modified
         {
-            return cached.resource.clone();
+            return Ok((file, metadata, cached.clone()));
         }
-        let source_token = uuid::Uuid::new_v4().to_string();
-        let resource = self.describe_canvas_file(entry, &mut file, &metadata, &source_token);
-        self.inspection_cache.insert(
-            entry.project_relative_path.clone(),
-            CachedCanvasFileInspection {
-                identity,
-                size: metadata.len(),
-                modified,
-                source_token,
-                resource: resource.clone(),
-                video_text_tracks: None,
-            },
-        );
-        resource
+        self.canvas_file_cache.remove(path);
+        let source = CachedProjectFileSource {
+            identity,
+            size: metadata.len(),
+            modified,
+            source_token: uuid::Uuid::new_v4().to_string(),
+            revision: None,
+        };
+        self.file_source_cache
+            .insert(path.to_owned(), source.clone());
+        Ok((file, metadata, source))
     }
 
     fn describe_canvas_file(
         &self,
         entry: &ProjectTreeEntry,
         file: &mut fs::File,
-        metadata: &fs::Metadata,
-        source_token: &str,
-    ) -> CanvasResource {
+    ) -> CachedCanvasFileDescription {
         let (media_kind, mime_type, text_language) =
             match classify_canvas_file(&entry.project_relative_path, file) {
                 Ok(classification) => classification,
                 Err(error) => {
-                    return unavailable_canvas_file_resource(
-                        entry,
-                        canvas_media_kind_from_path(&entry.project_relative_path),
-                        CanvasNodeAvailability::Unreadable {
-                            message: error.to_string(),
-                        },
-                    );
+                    return CachedCanvasFileDescription::Unreadable {
+                        media_kind: canvas_media_kind_from_path(&entry.project_relative_path),
+                        message: error.to_string(),
+                    };
                 }
             };
         let relative = match ProjectRelativePath::parse(&entry.project_relative_path) {
             Ok(relative) => relative,
             Err(error) => {
-                return unavailable_canvas_file_resource(
-                    entry,
+                return CachedCanvasFileDescription::Unreadable {
                     media_kind,
-                    CanvasNodeAvailability::Unreadable {
-                        message: error.to_string(),
-                    },
-                );
+                    message: error.to_string(),
+                };
             }
         };
         let preview = match self.inspect_node_adapter_data(&relative, media_kind) {
             Ok(adapter) => adapter,
             Err(availability) => {
-                return unavailable_canvas_file_resource(entry, media_kind, availability);
+                let message = match availability {
+                    CanvasNodeAvailability::Missing { message }
+                    | CanvasNodeAvailability::Unreadable { message } => message,
+                    CanvasNodeAvailability::Resolving { .. }
+                    | CanvasNodeAvailability::Available { .. } => {
+                        unreachable!("Canvas inspection errors are unavailable states")
+                    }
+                };
+                return CachedCanvasFileDescription::Unreadable {
+                    media_kind,
+                    message,
+                };
             }
         };
-        CanvasResource::File {
-            project_relative_path: entry.project_relative_path.clone(),
+        CachedCanvasFileDescription::Ready {
             media_kind,
-            availability: Box::new(CanvasNodeAvailability::Resolving {
-                size: metadata.len(),
-                mime_type,
-                source_token: source_token.to_owned(),
-                canvas_image_previewable: preview.map(|preview| preview.previewable),
-                canvas_image_preview_source_width: preview
-                    .and_then(|preview| preview.dimensions.map(|dimensions| dimensions.width)),
-            }),
+            mime_type,
+            canvas_image_previewable: preview.map(|preview| preview.previewable),
+            canvas_image_preview_source_width: preview
+                .and_then(|preview| preview.dimensions.map(|dimensions| dimensions.width)),
             image_dimensions: preview.and_then(|preview| preview.dimensions),
             text_language,
-        }
-    }
-
-    fn resolve_canvas_file_descriptor(
-        &self,
-        entry: &ProjectTreeEntry,
-        descriptor: &CanvasResource,
-        revision: String,
-    ) -> CanvasResource {
-        let CanvasResource::File {
-            media_kind,
-            availability,
-            image_dimensions,
-            text_language,
-            ..
-        } = descriptor
-        else {
-            unreachable!("a Canvas source descriptor always represents a file");
-        };
-        let CanvasNodeAvailability::Resolving {
-            size,
-            mime_type,
-            canvas_image_previewable,
-            canvas_image_preview_source_width,
-            ..
-        } = availability.as_ref()
-        else {
-            return descriptor.clone();
-        };
-        CanvasResource::File {
-            project_relative_path: entry.project_relative_path.clone(),
-            media_kind: *media_kind,
-            availability: Box::new(CanvasNodeAvailability::Available {
-                size: *size,
-                mime_type: mime_type.clone(),
-                file_url: String::new(),
-                canvas_image_previewable: *canvas_image_previewable,
-                canvas_image_preview_source_width: *canvas_image_preview_source_width,
-                revision,
-            }),
-            image_dimensions: *image_dimensions,
-            text_language: text_language.clone(),
+            resolution_error: None,
+            video_text_tracks: None,
         }
     }
 
     pub(crate) fn resolve_canvas_sources(
         &mut self,
-        targets: &[CanvasSourceTarget],
+        targets: &[ProjectFileSourceTarget],
         source_digests: &ProjectSourceDigestResolver,
     ) -> Result<CanvasSourceResolutionView, ProjectError> {
         self.canvas_workspace.as_ref().map_err(|unavailable| {
@@ -1129,130 +1117,241 @@ impl ProjectService {
                 .is_ok_and(|workspace| canvas_path_is_visible(path, &workspace.state));
             let source_is_feedback_maintenance =
                 is_feedback_video_path(&self.feedback_document, path);
-            let entry = self
-                .project_tree
-                .entry(path)
-                .filter(|_| source_is_visible || source_is_feedback_maintenance)
-                .cloned()
-                .ok_or_else(|| {
-                    ProjectError::service(
-                        "canvas_source_not_projected",
-                        format!(
-                            "Canvas source is not in the current visible or Feedback maintenance resources: {path}"
-                        ),
-                    )
-                })?;
-            if entry.kind != ProjectPathKind::File {
+            if self.project_tree.entry(path).is_none()
+                || (!source_is_visible && !source_is_feedback_maintenance)
+            {
                 return Err(ProjectError::service(
-                    "canvas_source_not_file",
-                    format!("Canvas source is not a file: {path}"),
+                    "canvas_source_not_projected",
+                    format!(
+                        "Canvas source is not in the current visible or Feedback maintenance resources: {path}"
+                    ),
                 ));
             }
-            let cached = self.inspection_cache.get(path).ok_or_else(|| {
+            let resolution = self.resolve_project_file_source_inner(target, source_digests)?;
+            let source = self.file_source_cache.get(path).cloned().ok_or_else(|| {
                 ProjectError::service(
-                    "canvas_source_changed",
-                    format!("Canvas source changed: {path}"),
+                    "project_file_source_changed",
+                    format!("Project file source changed: {path}"),
                 )
             })?;
-            if cached.source_token != target.source_token {
-                return Err(ProjectError::service(
-                    "canvas_source_changed",
-                    format!("Canvas source changed: {path}"),
-                ));
-            }
-            let descriptor = cached.resource.clone();
-            let cached_video_text_tracks = cached.video_text_tracks.clone();
-            if matches!(
-                &descriptor,
-                CanvasResource::File {
-                    availability,
-                    ..
-                } if matches!(availability.as_ref(), CanvasNodeAvailability::Available { .. })
-            ) {
-                let media_kind = match &descriptor {
-                    CanvasResource::File { media_kind, .. } => *media_kind,
-                    CanvasResource::Directory { .. } => unreachable!("a source target is a file"),
-                };
-                let video_text_tracks = if source_is_visible
-                    && media_kind == CanvasMediaKind::Video
-                    && cached_video_text_tracks.is_none()
-                {
-                    let tracks = self.resolve_video_text_track_sources(
-                        &target.project_relative_path,
-                        media_kind,
-                        source_digests,
-                    )?;
-                    self.inspection_cache
-                        .get_mut(path)
-                        .expect("the resolved Canvas source remains cached")
-                        .video_text_tracks = tracks.clone();
-                    tracks
-                } else {
-                    cached_video_text_tracks
-                };
-                sources.push(resolved_canvas_source(
-                    target.source_token.clone(),
-                    &descriptor,
-                    video_text_tracks,
-                ));
-                continue;
-            }
-            let mut file =
-                open_no_symlink_existing_project_file(&self.root, &target.project_relative_path)?;
-            let metadata = file.metadata()?;
-            let identity = debrute_native_fs::file_identity(&file)?;
-            let modified = metadata.modified()?;
-            if identity != cached.identity
-                || metadata.len() != cached.size
-                || modified != cached.modified
+            let description = self.canvas_file_cache.get(path).cloned().ok_or_else(|| {
+                ProjectError::service(
+                    "canvas_source_not_described",
+                    format!("Canvas source is not described: {path}"),
+                )
+            })?;
+            let media_kind = description.media_kind();
+            let video_text_tracks = if source_is_visible
+                && matches!(&resolution, ProjectFileSourceResolution::Available(_))
+                && description.needs_video_text_tracks()
             {
-                self.inspection_cache.remove(path);
-                return Err(ProjectError::service(
-                    "canvas_source_changed",
-                    format!("Canvas source changed: {path}"),
-                ));
-            }
-            let media_kind = match &descriptor {
-                CanvasResource::File { media_kind, .. } => *media_kind,
-                CanvasResource::Directory { .. } => unreachable!("a source target is a file"),
-            };
-            let resource = match source_digests.resolve(&mut file) {
-                Ok(revision) => self.resolve_canvas_file_descriptor(&entry, &descriptor, revision),
-                Err(error) => unavailable_canvas_file_resource(
-                    &entry,
-                    media_kind,
-                    CanvasNodeAvailability::Unreadable {
-                        message: error.to_string(),
-                    },
-                ),
-            };
-            let video_text_tracks = if source_is_visible {
-                self.resolve_video_text_track_sources(
+                let tracks = self.resolve_video_text_track_sources(
                     &target.project_relative_path,
                     media_kind,
                     source_digests,
-                )?
+                )?;
+                if let Some(CachedCanvasFileDescription::Ready {
+                    video_text_tracks, ..
+                }) = self.canvas_file_cache.get_mut(path)
+                {
+                    *video_text_tracks = tracks.clone();
+                }
+                tracks
             } else {
-                None
+                description.video_text_tracks()
             };
-            self.inspection_cache.insert(
-                path.to_owned(),
-                CachedCanvasFileInspection {
-                    identity,
-                    size: metadata.len(),
-                    modified,
-                    source_token: target.source_token.clone(),
-                    resource: resource.clone(),
-                    video_text_tracks: video_text_tracks.clone(),
-                },
-            );
-            sources.push(resolved_canvas_source(
-                target.source_token.clone(),
-                &resource,
+            let availability = match resolution {
+                ProjectFileSourceResolution::Available(_) => {
+                    let resource = canvas_file_resource(
+                        self.project_tree
+                            .entry(path)
+                            .expect("an admitted Canvas source remains in the Project Tree"),
+                        &source,
+                        self.canvas_file_cache
+                            .get(path)
+                            .expect("an admitted Canvas source remains described"),
+                    );
+                    let CanvasResource::File { availability, .. } = resource else {
+                        unreachable!("a resolved Canvas source is a file")
+                    };
+                    *availability
+                }
+                ProjectFileSourceResolution::Unreadable(message) => {
+                    CanvasNodeAvailability::Unreadable { message }
+                }
+            };
+            sources.push(CanvasResolvedSource {
+                source_token: target.source_token.clone(),
+                project_relative_path: path.to_owned(),
+                availability,
                 video_text_tracks,
-            ));
+            });
         }
         Ok(CanvasSourceResolutionView { sources })
+    }
+
+    pub(crate) fn resolve_project_file_source(
+        &mut self,
+        target: &ProjectFileSourceTarget,
+        source_digests: &ProjectSourceDigestResolver,
+    ) -> Result<ProjectResolvedFileSource, ProjectError> {
+        match self.resolve_project_file_source_inner(target, source_digests)? {
+            ProjectFileSourceResolution::Available(source) => Ok(source),
+            ProjectFileSourceResolution::Unreadable(message) => Err(ProjectError::service(
+                "project_file_source_unresolved",
+                format!("Project file source could not be resolved: {message}"),
+            )),
+        }
+    }
+
+    pub(crate) fn inspect_project_path(
+        &mut self,
+        project_relative_path: &ProjectDirectoryPath,
+    ) -> Result<ProjectPathInspection, ProjectError> {
+        let path = project_relative_path.as_str();
+        let entry = self.project_tree.entry(path).cloned().ok_or_else(|| {
+            ProjectError::service(
+                "project_path_not_loaded",
+                format!("Project path is not loaded: {path}"),
+            )
+        })?;
+        if entry.kind == ProjectPathKind::Directory {
+            let absolute =
+                resolve_no_symlink_existing_project_path(&self.root, project_relative_path)?;
+            let metadata = fs::metadata(absolute)?;
+            if !metadata.is_dir() {
+                return Err(ProjectError::service(
+                    "project_path_changed",
+                    format!("Project path changed: {path}"),
+                ));
+            }
+            return Ok(ProjectPathInspection::Directory {
+                project_relative_path: path.to_owned(),
+                created_at_ms: metadata_time_ms(metadata.created()),
+                modified_at_ms: metadata_time_ms(metadata.modified()),
+            });
+        }
+
+        let relative = ProjectRelativePath::parse(path)?;
+        let (_, metadata, source) = self.open_project_file_source(&relative)?;
+        let media_kind = canvas_media_kind_from_path(path);
+        let media = match media_kind {
+            CanvasMediaKind::Image => ProjectPathInspectionMedia::Image {
+                dimensions: self
+                    .node_adapter
+                    .image_preview_info(&self.root, &relative)
+                    .ok()
+                    .flatten()
+                    .and_then(|preview| preview.dimensions)
+                    .map(|dimensions| ProjectImageDimensions {
+                        width: dimensions.width,
+                        height: dimensions.height,
+                    }),
+            },
+            CanvasMediaKind::Video | CanvasMediaKind::Audio => {
+                let source_token = source.source_token;
+                if media_kind == CanvasMediaKind::Video {
+                    ProjectPathInspectionMedia::Video { source_token }
+                } else {
+                    ProjectPathInspectionMedia::Audio { source_token }
+                }
+            }
+            CanvasMediaKind::Text | CanvasMediaKind::Unknown => ProjectPathInspectionMedia::Other,
+        };
+        Ok(ProjectPathInspection::File {
+            project_relative_path: path.to_owned(),
+            size_bytes: metadata.len(),
+            created_at_ms: metadata_time_ms(metadata.created()),
+            modified_at_ms: metadata_time_ms(metadata.modified()),
+            media,
+        })
+    }
+
+    fn resolve_project_file_source_inner(
+        &mut self,
+        target: &ProjectFileSourceTarget,
+        source_digests: &ProjectSourceDigestResolver,
+    ) -> Result<ProjectFileSourceResolution, ProjectError> {
+        let path = target.project_relative_path.as_str();
+        let entry = self.project_tree.entry(path).cloned().ok_or_else(|| {
+            ProjectError::service(
+                "project_file_source_changed",
+                format!("Project file source changed: {path}"),
+            )
+        })?;
+        if entry.kind != ProjectPathKind::File {
+            return Err(ProjectError::service(
+                "project_file_source_not_file",
+                format!("Project source is not a file: {path}"),
+            ));
+        }
+        let cached = self.file_source_cache.get(path).cloned().ok_or_else(|| {
+            ProjectError::service(
+                "project_file_source_changed",
+                format!("Project file source changed: {path}"),
+            )
+        })?;
+        if cached.source_token != target.source_token {
+            return Err(ProjectError::service(
+                "project_file_source_changed",
+                format!("Project file source changed: {path}"),
+            ));
+        }
+        if let Some(revision) = cached.revision.clone() {
+            return Ok(ProjectFileSourceResolution::Available(
+                ProjectResolvedFileSource {
+                    project_relative_path: path.to_owned(),
+                    revision,
+                },
+            ));
+        }
+
+        let mut file =
+            open_no_symlink_existing_project_file(&self.root, &target.project_relative_path)?;
+        let metadata = file.metadata()?;
+        let identity = debrute_native_fs::file_identity(&file)?;
+        let modified = metadata.modified()?;
+        if identity != cached.identity
+            || metadata.len() != cached.size
+            || modified != cached.modified
+        {
+            self.file_source_cache.remove(path);
+            self.canvas_file_cache.remove(path);
+            return Err(ProjectError::service(
+                "project_file_source_changed",
+                format!("Project file source changed: {path}"),
+            ));
+        }
+        match source_digests.resolve(&mut file) {
+            Ok(revision) => {
+                self.file_source_cache
+                    .get_mut(path)
+                    .expect("the validated Project file source remains cached")
+                    .revision = Some(revision.clone());
+                if let Some(CachedCanvasFileDescription::Ready {
+                    resolution_error, ..
+                }) = self.canvas_file_cache.get_mut(path)
+                {
+                    *resolution_error = None;
+                }
+                Ok(ProjectFileSourceResolution::Available(
+                    ProjectResolvedFileSource {
+                        project_relative_path: path.to_owned(),
+                        revision,
+                    },
+                ))
+            }
+            Err(error) => {
+                let message = error.to_string();
+                if let Some(CachedCanvasFileDescription::Ready {
+                    resolution_error, ..
+                }) = self.canvas_file_cache.get_mut(path)
+                {
+                    *resolution_error = Some(message.clone());
+                }
+                Ok(ProjectFileSourceResolution::Unreadable(message))
+            }
+        }
     }
 
     fn resolve_video_text_track_sources(
@@ -1279,17 +1378,17 @@ impl ProjectService {
             .map(|track_path| {
                 let project_relative_path = ProjectRelativePath::parse(track_path)?;
                 let source_token = self
-                    .inspection_cache
+                    .file_source_cache
                     .get(project_relative_path.as_str())
                     .ok_or_else(|| {
                         ProjectError::service(
-                            "canvas_source_changed",
-                            format!("Canvas source changed: {project_relative_path}"),
+                            "project_file_source_changed",
+                            format!("Project file source changed: {project_relative_path}"),
                         )
                     })?
                     .source_token
                     .clone();
-                Ok(CanvasSourceTarget {
+                Ok(ProjectFileSourceTarget {
                     project_relative_path,
                     source_token,
                 })
@@ -1312,7 +1411,7 @@ impl ProjectService {
                 .cloned()
                 .ok_or_else(|| {
                     ProjectError::service(
-                        "canvas_source_unresolved",
+                        "project_file_source_unresolved",
                         format!(
                             "Canvas video text track could not be resolved: {}",
                             track.project_relative_path
@@ -1323,39 +1422,28 @@ impl ProjectService {
         Ok(Some(tracks))
     }
 
-    pub(crate) fn canvas_source_lease(
+    pub(crate) fn project_file_source_lease(
         &self,
         project_relative_path: &ProjectRelativePath,
         expected_revision: &str,
     ) -> Result<ProjectSourceLease, ProjectError> {
         let path = project_relative_path.as_str();
-        let cached = self.inspection_cache.get(path).ok_or_else(|| {
+        let cached = self.file_source_cache.get(path).ok_or_else(|| {
             ProjectError::service(
-                "canvas_source_unresolved",
-                format!("Canvas source has not been resolved: {path}"),
+                "project_file_source_unresolved",
+                format!("Project file source has not been resolved: {path}"),
             )
         })?;
-        let revision = match &cached.resource {
-            CanvasResource::File { availability, .. } => match availability.as_ref() {
-                CanvasNodeAvailability::Available { revision, .. } => revision,
-                _ => {
-                    return Err(ProjectError::service(
-                        "canvas_source_unresolved",
-                        format!("Canvas source has not been resolved: {path}"),
-                    ));
-                }
-            },
-            CanvasResource::Directory { .. } => {
-                return Err(ProjectError::service(
-                    "canvas_source_not_file",
-                    format!("Canvas source is not a file: {path}"),
-                ));
-            }
-        };
+        let revision = cached.revision.as_ref().ok_or_else(|| {
+            ProjectError::service(
+                "project_file_source_unresolved",
+                format!("Project file source has not been resolved: {path}"),
+            )
+        })?;
         if revision != expected_revision {
             return Err(ProjectError::service(
                 "stale_revision",
-                format!("Canvas source revision does not match: {path}"),
+                format!("Project file source revision does not match: {path}"),
             ));
         }
         let file = open_no_symlink_existing_project_file(&self.root, project_relative_path)?;
@@ -1366,8 +1454,8 @@ impl ProjectService {
             || metadata.modified()? != cached.modified
         {
             return Err(ProjectError::service(
-                "canvas_source_changed",
-                format!("Canvas source changed: {path}"),
+                "project_file_source_changed",
+                format!("Project file source changed: {path}"),
             ));
         }
         Ok(ProjectSourceLease {
@@ -1542,7 +1630,8 @@ impl ProjectService {
             feedback_hash: self.feedback_hash.clone(),
             path_state_diagnostic: self.path_state_diagnostic.clone(),
             project_tree: self.project_tree.clone(),
-            inspection_cache: self.inspection_cache.clone(),
+            file_source_cache: self.file_source_cache.clone(),
+            canvas_file_cache: self.canvas_file_cache.clone(),
         }
     }
 
@@ -1553,7 +1642,8 @@ impl ProjectService {
         self.feedback_hash = checkpoint.feedback_hash;
         self.path_state_diagnostic = checkpoint.path_state_diagnostic;
         self.project_tree = checkpoint.project_tree;
-        self.inspection_cache = checkpoint.inspection_cache;
+        self.file_source_cache = checkpoint.file_source_cache;
+        self.canvas_file_cache = checkpoint.canvas_file_cache;
     }
 
     fn refresh_health(&mut self) {
@@ -1713,6 +1803,68 @@ fn unavailable_canvas_file_resource(
     }
 }
 
+fn canvas_file_resource(
+    entry: &ProjectTreeEntry,
+    source: &CachedProjectFileSource,
+    description: &CachedCanvasFileDescription,
+) -> CanvasResource {
+    let CachedCanvasFileDescription::Ready {
+        media_kind,
+        mime_type,
+        canvas_image_previewable,
+        canvas_image_preview_source_width,
+        image_dimensions,
+        text_language,
+        resolution_error,
+        ..
+    } = description
+    else {
+        let CachedCanvasFileDescription::Unreadable {
+            media_kind,
+            message,
+        } = description
+        else {
+            unreachable!()
+        };
+        return unavailable_canvas_file_resource(
+            entry,
+            *media_kind,
+            CanvasNodeAvailability::Unreadable {
+                message: message.clone(),
+            },
+        );
+    };
+    let availability = if let Some(message) = resolution_error {
+        CanvasNodeAvailability::Unreadable {
+            message: message.clone(),
+        }
+    } else if let Some(revision) = &source.revision {
+        CanvasNodeAvailability::Available {
+            size: source.size,
+            mime_type: mime_type.clone(),
+            file_url: String::new(),
+            canvas_image_previewable: *canvas_image_previewable,
+            canvas_image_preview_source_width: *canvas_image_preview_source_width,
+            revision: revision.clone(),
+        }
+    } else {
+        CanvasNodeAvailability::Resolving {
+            size: source.size,
+            mime_type: mime_type.clone(),
+            source_token: source.source_token.clone(),
+            canvas_image_previewable: *canvas_image_previewable,
+            canvas_image_preview_source_width: *canvas_image_preview_source_width,
+        }
+    };
+    CanvasResource::File {
+        project_relative_path: entry.project_relative_path.clone(),
+        media_kind: *media_kind,
+        availability: Box::new(availability),
+        image_dimensions: *image_dimensions,
+        text_language: text_language.clone(),
+    }
+}
+
 fn read_text_classification_line(file: &mut fs::File) -> Result<Option<String>, ProjectError> {
     file.seek(SeekFrom::Start(0))?;
     let mut buffer = vec![0_u8; 4096];
@@ -1721,4 +1873,12 @@ fn read_text_classification_line(file: &mut fs::File) -> Result<Option<String>, 
     file.seek(SeekFrom::Start(0))?;
     let content = String::from_utf8_lossy(&buffer);
     Ok(content.lines().next().map(str::to_owned))
+}
+
+fn metadata_time_ms(result: std::io::Result<SystemTime>) -> Option<f64> {
+    result
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs_f64() * 1000.0)
 }

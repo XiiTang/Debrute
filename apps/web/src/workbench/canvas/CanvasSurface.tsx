@@ -1206,7 +1206,7 @@ function CanvasSurfaceRuntime({
     }
     const presentedNodes = runtime.scene.getPresentedNodes();
     const currentSelection = runtime.getSnapshot().selection;
-    if (currentSelection?.kind === 'nodes' && currentSelection.projectRelativePaths.length > 1) {
+    if (currentSelection && currentSelection.projectRelativePaths.length > 1) {
       onFeedbackBarTargetChange(canvasFeedbackBarTargetForSelection({
         projectRelativePaths: currentSelection.projectRelativePaths,
         nodes: [...presentedNodes.values()],

@@ -1,51 +1,40 @@
-export type CanvasSelection =
-  | {
-      kind: 'nodes';
-      projectRelativePaths: readonly string[];
-    }
-  | {
-      kind: 'diagnostic';
-      id: string;
-    };
+export interface CanvasSelection {
+  projectRelativePaths: readonly string[];
+}
 
 export function canvasNodeSelection(
   projectRelativePaths: Iterable<string>
 ): CanvasSelection | undefined {
   const normalized = [...new Set(projectRelativePaths)].sort(compareProjectRelativePaths);
   return normalized.length > 0
-    ? { kind: 'nodes', projectRelativePaths: normalized }
+    ? { projectRelativePaths: normalized }
     : undefined;
 }
 
 export function normalizeCanvasSelection(
   selection: CanvasSelection | undefined
 ): CanvasSelection | undefined {
-  return selection?.kind === 'nodes'
-    ? canvasNodeSelection(selection.projectRelativePaths)
-    : selection;
+  return selection ? canvasNodeSelection(selection.projectRelativePaths) : undefined;
 }
 
 export function selectedNodeProjectRelativePaths(
   selection: CanvasSelection | undefined
 ): string[] {
-  return selection?.kind === 'nodes' ? [...selection.projectRelativePaths] : [];
+  return selection ? [...selection.projectRelativePaths] : [];
 }
 
 export function isCanvasNodeSelected(
   selection: CanvasSelection | undefined,
   projectRelativePath: string
 ): boolean {
-  return selection?.kind === 'nodes'
-    && selection.projectRelativePaths.includes(projectRelativePath);
+  return selection?.projectRelativePaths.includes(projectRelativePath) ?? false;
 }
 
 export function toggleCanvasNodeSelection(
   selection: CanvasSelection | undefined,
   projectRelativePath: string
 ): CanvasSelection | undefined {
-  const paths = selection?.kind === 'nodes'
-    ? new Set(selection.projectRelativePaths)
-    : new Set<string>();
+  const paths = new Set(selection?.projectRelativePaths);
   if (paths.has(projectRelativePath)) {
     paths.delete(projectRelativePath);
   } else {
@@ -68,9 +57,7 @@ export function pruneCanvasSelection(
   selection: CanvasSelection | undefined,
   currentNodePaths: ReadonlySet<string>
 ): CanvasSelection | undefined {
-  if (selection?.kind !== 'nodes') {
-    return selection;
-  }
+  if (!selection) return undefined;
   return canvasNodeSelection(
     selection.projectRelativePaths.filter((path) => currentNodePaths.has(path))
   );
@@ -83,13 +70,7 @@ export function sameCanvasSelection(
   if (left === right) {
     return true;
   }
-  if (!left || !right || left.kind !== right.kind) {
-    return false;
-  }
-  if (left.kind === 'diagnostic' && right.kind === 'diagnostic') {
-    return left.id === right.id;
-  }
-  if (left.kind !== 'nodes' || right.kind !== 'nodes') {
+  if (!left || !right) {
     return false;
   }
   return left.projectRelativePaths.length === right.projectRelativePaths.length

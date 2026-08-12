@@ -152,6 +152,12 @@ Focused units own cohesive state:
   commands, and invalidation when the project changes.
 - Canvas controllers own Canvas feedback, overlays, and runtime interaction.
 - Text services own editor buffers and floating editor windows.
+- The Project-scoped Inspection Target owns one normalized empty, multiple, or
+  single Project-relative path target. Explorer and Canvas selections remain
+  independent; whichever publishes last preempts the Inspector. `Inspect`
+  republishes the context menu's complete selection before opening the panel.
+  Closing Inspector preserves the latest target without issuing file or model
+  requests. Empty and multiple targets also issue no requests.
 - `WorkbenchWindowHost` owns Workbench panel geometry, the panel dock,
   Project-scoped panel layout, and one window order shared by panels and
   floating text editors. Canvas controllers do not participate in that state.
@@ -161,6 +167,14 @@ The owner of an asynchronous operation applies request-version or
 project-generation checks where overlapping results can occur. Failed loads are
 not converted into successful empty data, and failed saves leave the relevant
 draft available with an owning error state.
+
+Inspector is intentionally quieter: a selected basename, Project-relative
+path, and filename-derived format render immediately; unavailable individual
+metadata fields are omitted. Runtime file metadata, browser-owned video/audio
+metadata, and the collapsed AI Generation Record load independently. Results
+are admitted only for the current Project generation, target version, path, and
+where applicable exact Source Revision, so an older result never appears under
+a newer selection.
 
 The initial JavaScript graph contains only the bootstrap and critical
 Workbench shell. Settings, Explorer presentation, Inspector, Terminal panel

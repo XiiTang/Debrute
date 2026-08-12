@@ -107,9 +107,6 @@ export function clearCanvasSelectionAfterDeletedPath(
   if (!selection) {
     return undefined;
   }
-  if (selection.kind !== 'nodes') {
-    return selection;
-  }
   return canvasNodeSelection(selection.projectRelativePaths.filter((path) => (
     !isProjectPathContainedByDeletedPath(path, deletedProjectRelativePath)
   )));
@@ -123,7 +120,7 @@ export function rewriteCanvasSelectionAfterPathChanges(
     status: 'ok' | 'skipped';
   }[]
 ): CanvasSelection | undefined {
-  if (selection?.kind !== 'nodes') {
+  if (!selection) {
     return selection;
   }
   const completed = changes

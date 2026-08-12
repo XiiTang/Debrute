@@ -173,7 +173,7 @@ describe('CanvasSurface', () => {
     };
 
     const html = renderToStaticMarkup(surface(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: ['image-production/cover.png'] }
+      selection: { projectRelativePaths: ['image-production/cover.png'] }
     }));
 
     expect(html).toContain('data-canvas-entity="node"');
@@ -428,7 +428,7 @@ describe('CanvasSurface', () => {
       edges: [],
     };
     const runtime = canvasRuntimeFixture(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+      selection: { projectRelativePaths: ['flow/a.png'] }
     });
     const raiseCanvasSelection = vi.fn(async () => undefined);
 
@@ -719,7 +719,7 @@ describe('CanvasSurface', () => {
     };
 
     const runtime = canvasRuntimeFixture(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png', 'flow/b.png'] },
+      selection: { projectRelativePaths: ['flow/a.png', 'flow/b.png'] },
     });
 
     try {
@@ -732,7 +732,7 @@ describe('CanvasSurface', () => {
       expect(container.querySelectorAll('.canvas-node-resize')).toHaveLength(0);
 
       await act(async () => {
-        runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+        runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
       });
 
       expect(container.querySelectorAll('.canvas-node-shell[data-canvas-selected="true"]')).toHaveLength(1);
@@ -756,7 +756,7 @@ describe('CanvasSurface', () => {
       edges: [],
     };
     const runtime = canvasRuntimeFixture(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+      selection: { projectRelativePaths: ['flow/a.png'] }
     });
 
     try {
@@ -816,7 +816,6 @@ describe('CanvasSurface', () => {
       });
       expect(runtime.getSnapshot().pointerInteraction).toBeUndefined();
       expect(runtime.getSnapshot().selection).toEqual({
-        kind: 'nodes',
         projectRelativePaths: ['flow/a.png']
       });
       expect(container.querySelector('[data-testid="canvas-selection-marquee"]')).toBe(marqueeElement);
@@ -896,7 +895,6 @@ describe('CanvasSurface', () => {
       });
       expect(runtime.getSnapshot().pointerInteraction).toBeUndefined();
       expect(runtime.getSnapshot().selection).toEqual({
-        kind: 'nodes',
         projectRelativePaths: ['flow/a.png']
       });
     } finally {
@@ -1039,7 +1037,7 @@ describe('CanvasSurface', () => {
       edges: [],
     };
     const runtime = canvasRuntimeFixture(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+      selection: { projectRelativePaths: ['flow/a.png'] }
     });
     const dismissTarget = vi.fn();
 
@@ -1136,7 +1134,6 @@ describe('CanvasSurface', () => {
         await Promise.resolve();
       });
       expect(runtime.getSnapshot().selection).toEqual({
-        kind: 'nodes',
         projectRelativePaths: [node.projectRelativePath]
       });
       expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBe(node.projectRelativePath);
@@ -1207,7 +1204,6 @@ describe('CanvasSurface', () => {
         }));
       });
       expect(runtime.getSnapshot().selection).toEqual({
-        kind: 'nodes',
         projectRelativePaths: [node.projectRelativePath]
       });
       expect(container.querySelector('[data-testid="mock-video-node"]')?.getAttribute('data-playback-toggle-request-id')).toBe('1');
@@ -1255,7 +1251,6 @@ describe('CanvasSurface', () => {
 
       expect(runtime.getSnapshot()).toMatchObject({
         selection: {
-          kind: 'nodes',
           projectRelativePaths: [node.projectRelativePath]
         },
         contentInteractionProjectRelativePath: node.projectRelativePath
@@ -1314,7 +1309,6 @@ describe('CanvasSurface', () => {
 
       expect(runtime.getSnapshot()).toMatchObject({
         selection: {
-          kind: 'nodes',
           projectRelativePaths: [activeNode.projectRelativePath, targetNode.projectRelativePath]
         },
         contentInteractionProjectRelativePath: undefined
@@ -1340,7 +1334,7 @@ describe('CanvasSurface', () => {
       edges: [],
     };
     const runtime = canvasRuntimeFixture(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png', 'flow/b.png'] }
+      selection: { projectRelativePaths: ['flow/a.png', 'flow/b.png'] }
     });
     const onOpenContextMenu = vi.fn();
 
@@ -1399,14 +1393,12 @@ describe('CanvasSurface', () => {
       });
       expect(runtime.getSnapshot().pointerInteraction).toBeUndefined();
       expect(runtime.getSnapshot().selection).toEqual({
-        kind: 'nodes',
         projectRelativePaths: ['flow/a.png', 'flow/b.png']
       });
       await act(async () => {
         unselectedInvocation.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       });
       expect(runtime.getSnapshot().selection).toEqual({
-        kind: 'nodes',
         projectRelativePaths: ['flow/c.png']
       });
       expect(onOpenContextMenu).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -1748,7 +1740,7 @@ describe('CanvasSurface', () => {
     };
 
     const html = renderToStaticMarkup(surface(projection, {
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      selection: { projectRelativePaths: ['flow/a.md'] },
       textFileBuffers: {
         'flow/a.md': textBufferFixture('flow/a.md', '# A', 'rev-a'),
         'flow/b.md': textBufferFixture('flow/b.md', '# B', 'rev-b')
@@ -1775,7 +1767,7 @@ describe('CanvasSurface', () => {
     try {
       await act(async () => {
         root.render(surface(projection, {
-          selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.md'] },
+          selection: { projectRelativePaths: ['flow/selected.md'] },
           contentInteractionProjectRelativePath: 'flow/selected.md',
           textFileBuffers: {
             'flow/selected.md': textBufferFixture('flow/selected.md', '# Selected', 'rev-selected'),
@@ -1804,7 +1796,6 @@ describe('CanvasSurface', () => {
 
     const html = renderToStaticMarkup(surface(projection, {
       selection: {
-        kind: 'nodes',
         projectRelativePaths: ['flow/a.md', 'flow/b.md']
       },
       textFileBuffers: {
@@ -1828,7 +1819,6 @@ describe('CanvasSurface', () => {
 
     const html = renderToStaticMarkup(surface(projection, {
       selection: {
-        kind: 'nodes',
         projectRelativePaths: ['media/clip.mp4', 'media/theme.mp3']
       }
     }));
@@ -2569,7 +2559,6 @@ describe('CanvasSurface', () => {
 
       await act(async () => {
         runtime.setSelection({
-          kind: 'nodes',
           projectRelativePaths: ['flow/a.png', 'flow/b.png']
         });
         await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -2636,7 +2625,7 @@ describe('CanvasSurface', () => {
     };
     const runtime = canvasRuntimeFixture(projection, {
       camera: { x: 0, y: 0, z: 0.1 },
-      selection: { kind: 'nodes', projectRelativePaths: [node.projectRelativePath ] }
+      selection: { projectRelativePaths: [node.projectRelativePath ] }
     });
 
     try {
@@ -3514,6 +3503,17 @@ function feedbackDocument(entries: CanvasFeedbackDocument['entries']): CanvasFee
 }
 
 const actions: WorkbenchActions = {
+  inspectProjectPath: async ({ projectRelativePath }) => ({
+    kind: 'file',
+    projectRelativePath,
+    sizeBytes: 0,
+    media: { kind: 'other' }
+  }),
+  resolveProjectFileSource: async ({ projectRelativePath }) => ({
+    projectRelativePath,
+    sourceRevision: 'revision',
+    fileUrl: '/file'
+  }),
   resolveCanvasSources: async () => ({ sources: [] }),
   lookupModelArtifactProvenance: async () => {
     throw new Error('not used');

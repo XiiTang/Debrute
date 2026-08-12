@@ -39,55 +39,6 @@
   color: var(--db-text);
 }
 
-.db-diagnostic-list {
-  display: grid;
-  gap: var(--db-space-2);
-  min-width: 0;
-}
-
-.db-diagnostic-list--compact {
-  gap: var(--db-space-1);
-}
-
-.db-diagnostic-row {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: var(--db-space-2);
-  align-items: start;
-  border: 0;
-  border-radius: var(--db-radius-md);
-  padding: var(--db-space-3);
-  background: var(--db-surface-2);
-  color: var(--db-text);
-  cursor: pointer;
-  text-align: left;
-}
-
-.db-diagnostic-row:disabled {
-  cursor: default;
-}
-
-.db-diagnostic-row--warning svg {
-  color: var(--db-warning);
-}
-
-.db-diagnostic-row--error svg {
-  color: var(--db-danger);
-}
-
-.db-diagnostic-row__message,
-.db-diagnostic-row__source {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.db-diagnostic-row__source {
-  grid-column: 2;
-  color: var(--db-text-subtle);
-  font-size: var(--db-font-xs);
-}
-
 .asset-ai-metadata summary {
   cursor: pointer;
   color: var(--db-text);
@@ -102,16 +53,6 @@
 .asset-ai-metadata-content {
   display: grid;
   gap: 12px;
-}
-
-.asset-ai-metadata-message {
-  color: var(--db-text-muted);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.asset-ai-metadata-message.error {
-  color: var(--db-danger);
 }
 
 .asset-ai-metadata-json {

@@ -358,6 +358,14 @@ fn project_domain_router() -> Router<WorkbenchRouterState> {
             get(super::project_routes::raw_file).head(super::project_routes::raw_file),
         )
         .route(
+            "/workbench/bindings/{binding_id}/files/inspect",
+            post(super::project_routes::inspect_project_path),
+        )
+        .route(
+            "/workbench/bindings/{binding_id}/files/source/resolve",
+            post(super::project_routes::resolve_project_file_source),
+        )
+        .route(
             "/workbench/bindings/{binding_id}/files",
             post(super::project_routes::create_path),
         )

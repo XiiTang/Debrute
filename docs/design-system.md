@@ -409,8 +409,10 @@ aggregate status and controlled switch; it does not present a platform master,
 connection list, or manual Connect action. Photoshop transfer activity disables
 only its row switch and uses one inline `Transfer in progress.` message.
 
-Explorer owns tree geometry and editing. Inspector owns selection properties,
-metadata, and diagnostics. Terminal owns terminal tabs, sessions, status, and
+Explorer owns tree geometry and editing. Inspector owns on-demand information
+for the latest Explorer or Canvas Project-path selection and the file's optional
+AI Generation Record; it does not own Canvas geometry or Project Diagnostics.
+Terminal owns terminal tabs, sessions, status, and
 emulator geometry. Project Open owns one focused entry rendered directly over
 the Canvas background. Canvas owns node geometry, media presentation,
 annotations, handles, feedback, and overlay placement.

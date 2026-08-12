@@ -1023,6 +1023,97 @@ fn project_open_publishes_file_descriptors_before_exact_sources_are_resolved() {
 }
 
 #[test]
+fn inspector_reads_project_path_metadata_and_resolves_an_exact_file_source() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("inspector-project-path");
+    fs::write(
+        Path::new(&project.root).join("source clip.mp4"),
+        b"browser metadata source",
+    )
+    .expect("media fixture should be written");
+    let client = test_client();
+    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+
+    let inspection = client
+        .post(format!(
+            "{}/api/workbench/bindings/{}/files/inspect",
+            runtime.origin(),
+            project.binding_id()
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({ "projectRelativePath": "source clip.mp4" }))
+        .send()
+        .expect("Project path inspection should complete");
+    let status = inspection.status().as_u16();
+    let inspection: Value = inspection
+        .json()
+        .expect("Project path inspection should return JSON");
+    assert_eq!(status, 200, "{inspection}");
+    assert_eq!(inspection["kind"], "file");
+    assert_eq!(inspection["projectRelativePath"], "source clip.mp4");
+    assert_eq!(inspection["sizeBytes"], 23);
+    assert!(inspection["modifiedAtMs"].is_number());
+    assert_eq!(inspection["media"]["kind"], "video");
+    let source_token = inspection["media"]["sourceToken"]
+        .as_str()
+        .expect("video inspection should include a source token");
+
+    let resolved = client
+        .post(format!(
+            "{}/api/workbench/bindings/{}/files/source/resolve",
+            runtime.origin(),
+            project.binding_id()
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({
+            "projectRelativePath": "source clip.mp4",
+            "sourceToken": source_token
+        }))
+        .send()
+        .expect("Project file source resolution should complete");
+    let resolved_status = resolved.status().as_u16();
+    let resolved: Value = resolved
+        .json()
+        .expect("Project file source resolution should return JSON");
+    assert_eq!(resolved_status, 200, "{resolved}");
+    assert_eq!(resolved["projectRelativePath"], "source clip.mp4");
+    assert_eq!(
+        resolved["sourceRevision"],
+        media_revision(&Path::new(&project.root).join("source clip.mp4"))
+    );
+    assert!(
+        resolved["fileUrl"]
+            .as_str()
+            .is_some_and(|url| url.contains("/files/raw/source%20clip.mp4?v="))
+    );
+
+    let root = client
+        .post(format!(
+            "{}/api/workbench/bindings/{}/files/inspect",
+            runtime.origin(),
+            project.binding_id()
+        ))
+        .header(ORIGIN, runtime.origin())
+        .header(COOKIE, &cookie)
+        .header(WORKBENCH_CONNECTION_HEADER, &credential)
+        .json(&json!({ "projectRelativePath": "" }))
+        .send()
+        .expect("Project root inspection should complete");
+    assert_eq!(root.status().as_u16(), 200);
+    let root: Value = root
+        .json()
+        .expect("Project root inspection should return JSON");
+    assert_eq!(root["kind"], "directory");
+    assert_eq!(root["projectRelativePath"], "");
+    assert!(root["modifiedAtMs"].is_number());
+}
+
+#[test]
 fn passive_media_routes_reject_missing_or_empty_identity_values() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("media-query-contract");

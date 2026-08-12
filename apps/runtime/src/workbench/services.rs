@@ -157,7 +157,7 @@ pub struct WorkbenchRuntimeServices {
     activity: Arc<ActivityService>,
     activity_events: broadcast::Sender<ActivityEvent>,
     working_copies: Arc<WorkingCopyStore>,
-    canvas_source_digests: Arc<crate::project::ProjectSourceDigestResolver>,
+    project_source_digests: Arc<crate::project::ProjectSourceDigestResolver>,
 }
 
 impl WorkbenchRuntimeServices {
@@ -361,7 +361,7 @@ impl WorkbenchRuntimeServices {
             activity,
             activity_events,
             working_copies,
-            canvas_source_digests: Arc::new(crate::project::ProjectSourceDigestResolver::default()),
+            project_source_digests: Arc::new(crate::project::ProjectSourceDigestResolver::default()),
         });
         let (recent_projects, theme_preference) = services
             .global
@@ -381,10 +381,10 @@ impl WorkbenchRuntimeServices {
         &self.global
     }
 
-    pub(crate) fn canvas_source_digests(
+    pub(crate) fn project_source_digests(
         &self,
     ) -> &Arc<crate::project::ProjectSourceDigestResolver> {
-        &self.canvas_source_digests
+        &self.project_source_digests
     }
 
     pub fn settings_mutate(
@@ -1225,7 +1225,11 @@ pub(crate) fn make_canvas_resolved_source_public(
     }
 }
 
-fn project_file_url(binding_id: &str, project_relative_path: &str, revision: &str) -> String {
+pub(crate) fn project_file_url(
+    binding_id: &str,
+    project_relative_path: &str,
+    revision: &str,
+) -> String {
     format!(
         "/api/workbench/bindings/{}/files/raw/{}?v={}",
         percent_encode_segment(binding_id),

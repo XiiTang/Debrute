@@ -83,7 +83,7 @@ describe('CanvasEditorRuntime scene', () => {
     ];
     const edges = [edge('source-target', 'source', 'target')];
     const runtime = createRuntime(projection(nodes, edges));
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['source'] });
+    runtime.setSelection({ projectRelativePaths: ['source'] });
     const nodeSnapshot = runtime.scene.getRenderSnapshot().nodesByPath;
     const updates: CanvasScenePresentationUpdate[] = [];
     runtime.scene.subscribePresentation((update) => updates.push(update));
@@ -95,7 +95,6 @@ describe('CanvasEditorRuntime scene', () => {
     expect(runtime.scene.queryEdgeGroupIds({ x: 0, y: 0, width: 500, height: 500 }))
       .toEqual([]);
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['source']
     });
 
@@ -124,7 +123,6 @@ describe('CanvasEditorRuntime scene', () => {
     expect(restored.edgeGroups.map((group) => group.edgeIds)).toEqual([['source-target']]);
     expect(restored.edgeGroups[0]?.path).toContain('M 200 100');
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['source']
     });
     runtime.dispose();

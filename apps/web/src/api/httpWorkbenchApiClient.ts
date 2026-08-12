@@ -7,6 +7,8 @@ import type {
   DebruteHttpErrorBody,
   RuntimeProjectUploadImportPlan,
   ModelArtifactProvenanceLookup,
+  ProjectFileSourceResolution,
+  ProjectPathInspection,
   SaveCanvasTextPreviewSourceResult,
   SaveCanvasTextPreviewSourceInput,
   SaveCanvasVideoPreviewSourceInput,
@@ -767,6 +769,18 @@ export function createHttpWorkbenchApiClient(options: {
       input,
       signal
     ),
+    inspectProjectPath: (input, signal) => requestForCurrentProject<ProjectPathInspection>(
+      'POST',
+      '/files/inspect',
+      input,
+      signal
+    ),
+    resolveProjectFileSource: (input, signal) => requestForCurrentProject<ProjectFileSourceResolution>(
+      'POST',
+      '/files/source/resolve',
+      input,
+      signal
+    ),
     saveCanvasVideoPreviewSource: (input, signal) => runProjectRequest((scope, projectSignal) => (
       requestFormData<SaveCanvasVideoPreviewSourceResult>(
         'POST',
@@ -804,7 +818,12 @@ export function createHttpWorkbenchApiClient(options: {
       `/files/path/${encodeProjectPath(input.projectRelativePath)}/reveal`,
       { kind: input.kind }
     ),
-    lookupModelArtifactProvenance: (input) => requestForCurrentProject<ModelArtifactProvenanceLookup>('POST', '/model-artifacts/lookup', input),
+    lookupModelArtifactProvenance: (input, signal) => requestForCurrentProject<ModelArtifactProvenanceLookup>(
+      'POST',
+      '/model-artifacts/lookup',
+      input,
+      signal
+    ),
     readCanvasFeedback: () => requestForCurrentProject<CanvasFeedbackDocument>('GET', '/canvas-feedback'),
     updateCanvasFeedback: (input) => requestProjectMutation<WorkbenchCanvasFeedbackMutationResult>('PATCH', projectPath('/canvas-feedback'), input),
     resetCanvas: () => requestProjectMutation<RevisionedProjectCommandResult>(

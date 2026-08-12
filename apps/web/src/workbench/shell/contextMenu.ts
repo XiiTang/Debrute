@@ -18,7 +18,7 @@ export type WorkbenchContextMenuTargetKind = 'file' | 'directory';
 
 export type ProjectPathCommand =
   | 'send-to-photoshop'
-  | 'show-details'
+  | 'inspect'
   | 'reset-auto-layout'
   | 'create-file'
   | 'create-directory'
@@ -99,10 +99,8 @@ export function buildWorkbenchContextMenuItems(input: {
     const node = projectedContextMenuNode(input.projection, entry.projectRelativePath);
     return node ? [node] : [];
   });
+  const inspectionActions = [action('inspect')];
   const canvasActions = input.target.source === 'canvas' ? [
-    action('show-details', {
-      disabled: selectionNodes.length !== resolved.selectionEntries.length
-    }),
     action('reset-auto-layout', {
       disabled: selectionNodes.length !== resolved.selectionEntries.length
         || !selectionNodes.some((node) => node.layoutMode === 'manual')
@@ -143,6 +141,7 @@ export function buildWorkbenchContextMenuItems(input: {
     action('delete-permanently', { disabled: !resolved.filesystemCommandsAvailable })
   ]);
   return groupedMenuItems([
+    { id: 'inspection', items: inspectionActions },
     { id: 'canvas-actions', items: canvasActions },
     { id: 'new', items: creationActions },
     { id: 'file-actions', items: fileActions },

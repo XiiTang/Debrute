@@ -5,6 +5,25 @@ import { runProjectPathCommand } from './workbenchContextMenuCommands';
 import type { WorkbenchContextMenuTarget } from '../shell/contextMenu';
 
 describe('workbench context menu commands', () => {
+  it('inspects the complete current selection without requiring Canvas projection', () => {
+    const inspectEntries = vi.fn();
+    const openInspectorPanel = vi.fn();
+    const entries = [
+      { projectRelativePath: 'flow/a.png', kind: 'file' as const },
+      { projectRelativePath: 'flow/b.png', kind: 'file' as const }
+    ];
+
+    run({
+      command: 'inspect',
+      target: canvasTarget('flow/a.png', entries),
+      inspectEntries,
+      openInspectorPanel
+    });
+
+    expect(inspectEntries).toHaveBeenCalledWith(entries);
+    expect(openInspectorPanel).toHaveBeenCalledOnce();
+  });
+
   it('uses folded roots for Copy but explicit sorted entries for Copy Relative Paths', () => {
     const copyEntries = vi.fn();
     const cutEntries = vi.fn();
@@ -208,6 +227,8 @@ function run(overrides: {
   getProjectSnapshot?: Parameters<typeof runProjectPathCommand>[0]['getProjectSnapshot'];
   revealInCanvas?: Parameters<typeof runProjectPathCommand>[0]['revealInCanvas'];
   notify?: (input: Parameters<Parameters<typeof runProjectPathCommand>[0]['activities']['report']>[0]) => void;
+  inspectEntries?: Parameters<typeof runProjectPathCommand>[0]['inspectEntries'];
+  openInspectorPanel?: Parameters<typeof runProjectPathCommand>[0]['openInspectorPanel'];
 }): void {
   const noop = () => undefined;
   runProjectPathCommand({
@@ -243,7 +264,8 @@ function run(overrides: {
       report: (input) => (overrides.notify ?? noop)(input)
     },
     closeContextMenu: noop,
-    openInspectorPanel: noop,
+    inspectEntries: overrides.inspectEntries ?? noop,
+    openInspectorPanel: overrides.openInspectorPanel ?? noop,
     confirmTrash: overrides.confirmTrash ?? (() => true),
     confirmPermanentDelete: overrides.confirmPermanentDelete ?? (() => true),
     getProjectSnapshot: overrides.getProjectSnapshot ?? (() => undefined),

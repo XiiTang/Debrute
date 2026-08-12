@@ -50,6 +50,55 @@ pub struct ProjectTreeEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum ProjectPathInspection {
+    File {
+        #[serde(rename = "projectRelativePath")]
+        project_relative_path: String,
+        #[serde(rename = "sizeBytes")]
+        size_bytes: u64,
+        #[serde(rename = "createdAtMs", skip_serializing_if = "Option::is_none")]
+        created_at_ms: Option<f64>,
+        #[serde(rename = "modifiedAtMs", skip_serializing_if = "Option::is_none")]
+        modified_at_ms: Option<f64>,
+        media: ProjectPathInspectionMedia,
+    },
+    Directory {
+        #[serde(rename = "projectRelativePath")]
+        project_relative_path: String,
+        #[serde(rename = "createdAtMs", skip_serializing_if = "Option::is_none")]
+        created_at_ms: Option<f64>,
+        #[serde(rename = "modifiedAtMs", skip_serializing_if = "Option::is_none")]
+        modified_at_ms: Option<f64>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum ProjectPathInspectionMedia {
+    Image {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        dimensions: Option<ProjectImageDimensions>,
+    },
+    Video {
+        #[serde(rename = "sourceToken")]
+        source_token: String,
+    },
+    Audio {
+        #[serde(rename = "sourceToken")]
+        source_token: String,
+    },
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectImageDimensions {
+    pub width: u64,
+    pub height: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectTextFile {
     pub project_relative_path: String,
@@ -277,9 +326,15 @@ pub struct CanvasResourceView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CanvasSourceTarget {
+pub struct ProjectFileSourceTarget {
     pub project_relative_path: ProjectRelativePath,
     pub source_token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectResolvedFileSource {
+    pub project_relative_path: String,
+    pub revision: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
