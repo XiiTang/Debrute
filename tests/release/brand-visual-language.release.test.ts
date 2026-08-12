@@ -102,6 +102,7 @@ describe('brand visual language', () => {
     const fields = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/fields.css'), 'utf8');
     const menus = readFileSync(join(root, 'apps/web/src/workbench/ui/styles/menus.css'), 'utf8');
     const canvas = readFileSync(join(root, 'apps/web/src/workbench/styles/canvas.css'), 'utf8');
+    const feedback = readFileSync(join(root, 'apps/web/src/workbench/styles/feedback.css'), 'utf8');
     const buttonRule = controls.match(/\.db-button,\s*\.db-icon-button\s*\{[\s\S]*?\}/)?.[0];
     const fieldRule = fields.match(/\.db-input,\s*\.db-select\s*\{[\s\S]*?\}/)?.[0];
     expect(buttonRule).toContain('border: 0');
@@ -112,8 +113,8 @@ describe('brand visual language', () => {
       .toContain('background: var(--db-selection)');
     expect(menus.match(/\.db-menu__separator\s*\{[\s\S]*?\}/)?.[0])
       .toContain('background: transparent');
-    const feedbackCreatorRule = canvas.match(/\.canvas-feedback-add-comment\s*\{[\s\S]*?\}/)?.[0];
-    const feedbackCreatorFrameRule = canvas.match(/\.canvas-feedback-add-comment::before\s*\{[\s\S]*?\}/)?.[0];
+    const feedbackCreatorRule = feedback.match(/\.canvas-feedback-add-comment\s*\{[\s\S]*?\}/)?.[0];
+    const feedbackCreatorFrameRule = feedback.match(/\.canvas-feedback-add-comment::before\s*\{[\s\S]*?\}/)?.[0];
     const feedbackCapsuleRule = canvas.match(/\.canvas-feedback-comment-pill\s*\{[\s\S]*?\}/)?.[0];
     const feedbackCapsuleFrameRule = canvas.match(/\.canvas-feedback-comment-pill::before\s*\{[\s\S]*?\}/)?.[0];
     expect(feedbackCreatorRule).toContain('border: 0');
@@ -126,7 +127,10 @@ describe('brand visual language', () => {
       if (path.endsWith('/ui/styles/base.css') || path.endsWith('/styles/canvas.css')) {
         continue;
       }
-      const css = readFileSync(join(root, path), 'utf8');
+      const css = readFileSync(join(root, path), 'utf8').replace(
+        /\.canvas-feedback-add-comment::before\s*\{[\s\S]*?\}/,
+        ''
+      );
       const visibleBorders = [...css.matchAll(
         /^\s*border(?:-(?:top|right|bottom|left))?\s*:\s*([^;]+);/gm
       )].map((match) => match[1]!.trim()).filter((value) => value !== '0');

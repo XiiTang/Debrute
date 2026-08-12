@@ -1,5 +1,5 @@
-import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, IconButton, Input } from '../ui/index';
+import React, { useEffect, useRef, useState } from 'react';
+import { IconButton } from '../ui/index';
 import { useI18n } from '../i18n/index';
 import { FEEDBACK_ICON_MANIFEST } from './generatedFeedbackIconManifest';
 import { FeedbackIcon } from './FeedbackIcon';
@@ -17,15 +17,9 @@ export function FeedbackIconPicker({
   onClose(): void;
 }): React.ReactElement {
   const i18n = useI18n();
-  const [query, setQuery] = useState('');
-  const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase());
   const [viewport, setViewport] = useState({ width: 336, height: 288, scrollTop: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
-  const icons = useMemo(() => FEEDBACK_ICON_MANIFEST.filter((icon) => {
-    if (!deferredQuery) return true;
-    const haystack = `${icon.name} ${icon.categories.join(' ')} ${icon.tags.join(' ')}`.toLocaleLowerCase();
-    return haystack.includes(deferredQuery);
-  }), [deferredQuery]);
+  const icons = FEEDBACK_ICON_MANIFEST;
   const columnCount = Math.max(1, Math.floor(viewport.width / CELL_SIZE));
   const rowCount = Math.ceil(icons.length / columnCount);
   const startRow = Math.max(0, Math.floor(viewport.scrollTop / CELL_SIZE) - OVERSCAN_ROWS);
@@ -56,16 +50,6 @@ export function FeedbackIconPicker({
       role="dialog"
       aria-label={i18n.t('settings.feedback.iconPicker.title')}
     >
-      <div className="feedback-icon-picker__header">
-        <Input
-          autoFocus
-          value={query}
-          placeholder={i18n.t('settings.feedback.iconPicker.search')}
-          aria-label={i18n.t('settings.feedback.iconPicker.search')}
-          onChange={(event) => setQuery(event.currentTarget.value)}
-        />
-        <Button size="xs" onClick={onClose}>{i18n.t('common.close')}</Button>
-      </div>
       <div
         ref={viewportRef}
         className="feedback-icon-picker__viewport"

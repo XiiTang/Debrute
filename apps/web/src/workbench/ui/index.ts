@@ -1,5 +1,5 @@
 export { Button } from './Button';
-export { IconButton } from './IconButton';
+export { IconButton, type IconButtonProps } from './IconButton';
 export { DiscardChangesIcon } from './DiscardChangesIcon';
 export {
   AlertTriangle,

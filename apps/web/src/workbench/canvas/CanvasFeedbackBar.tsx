@@ -8,6 +8,10 @@ import type { CanvasFeedbackCapsule } from './CanvasFeedbackInteraction';
 import { CloseButton, IconButton } from '../ui/index';
 import { useI18n } from '../i18n';
 import { FeedbackIcon } from '../feedback/FeedbackIcon';
+import {
+  FeedbackBarMarkButton,
+  FeedbackImageRegionTools
+} from '../feedback/FeedbackBarPresentation';
 
 const MOMENT_PILL_COLORS = [
   'var(--db-canvas-moment-1)',
@@ -100,22 +104,10 @@ export function CanvasFeedbackBar({
             onSetMark={onSetMark}
           />
           {localToolset === 'image' ? (
-            <div className="canvas-feedback-local-mode" role="group" aria-label={i18n.t('canvas.feedback.imageRegionTools')}>
-              <IconButton
-                className="canvas-feedback-mark"
-                label={i18n.t('canvas.feedback.addPin')}
-                pressed={localFeedbackMode === 'pin'}
-                icon={<MapPin />}
-                onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'pin' ? undefined : 'pin')}
-              />
-              <IconButton
-                className="canvas-feedback-mark"
-                label={i18n.t('canvas.feedback.addRectangle')}
-                pressed={localFeedbackMode === 'rect'}
-                icon={<Square />}
-                onClick={() => onLocalFeedbackModeChange?.(localFeedbackMode === 'rect' ? undefined : 'rect')}
-              />
-            </div>
+            <FeedbackImageRegionTools
+              mode={localFeedbackMode}
+              onModeChange={onLocalFeedbackModeChange}
+            />
           ) : null}
           {localToolset === 'video' ? (
             <div className="canvas-feedback-local-mode" role="group" aria-label={i18n.t('canvas.feedback.videoMomentTools')}>
@@ -232,9 +224,8 @@ export function CanvasFeedbackMarkActions({
       {availableMarks.map(({ name: mark, icon }) => {
         const selected = marks.includes(mark);
         return (
-          <IconButton
+          <FeedbackBarMarkButton
             key={mark}
-            className="canvas-feedback-mark"
             label={mark}
             pressed={selected}
             disabled={pending}

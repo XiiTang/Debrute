@@ -74,14 +74,34 @@ Settings icon picker or accepted by Catalog writes.
 Workbench creation preflights only a non-empty Name and an exact local duplicate.
 Runtime remains authoritative for every Catalog write and alone counts Unicode
 graphemes and enforces the 32-grapheme upper bound and forbidden-control rules;
-a rejection retains the exact creation draft.
-The Settings UI edits membership directly: drag Catalog Feedback into the
-Floating Feedback Bar preview, drag within the preview to reorder, and remove
-from the preview to exclude it. It exposes no duplicate membership checkbox or
-picker. The same surface supports keyboard configuration: Enter or Space adds
-an available focused Catalog entry, and Left or Right reorders a focused
-preview entry. Catalog identities announce when they are already present or the
-eight-item bar is full.
+a rejection retains the exact icon-and-Name creation draft. New Catalog entries
+are inserted at the beginning of the persisted Catalog order. Settings preserves
+that order and renders an empty creation frame before it. Activating that frame
+opens an anchored icon picker with neither search nor a close control. Selecting
+an icon closes the picker and reveals and focuses the exact-Name input. It creates
+only the Catalog mapping when a non-empty Name loses focus or confirms with Enter. An
+empty blur discards the entire draft. There is no default icon, separate create
+button, or Catalog search.
+
+The Settings membership editor is a full-size image Feedback Bar presentation:
+its configurable Mark actions precede the inert fixed pin and rectangle tools,
+and its inert Comment row remains visible. The complete outer Bar frame accepts
+Catalog drops; horizontal pointer position selects the insertion slot. Pointer
+dragging previews addition and reordering in place, with a maximum of eight
+configurable actions. Dragging an existing member from its Catalog card
+repositions it rather than duplicating it. Dragging a Bar action so its center
+leaves the complete Bar frame collapses its slot, re-entering restores it, and
+releasing outside removes it. A ninth non-member never receives a placeholder
+and returns to the Catalog. Pointer cancellation restores the original order.
+The editor adds no separate keyboard add, reorder, or remove path.
+
+Catalog mappings render as naturally sized, wrapping icon-and-Name frames in
+persisted order. Names remain immutable while icons remain editable through the
+same anchored picker. Action Bar membership is shown only by a light selected
+surface. Each frame is directly draggable and reveals its overlaid delete
+control on hover. Deletion uses a Debrute modal and removes the mapping and any
+Action Bar membership together; it never changes existing Project Feedback
+Documents, whose now-unmapped Names continue to use the reserved fallback icon.
 
 The Feedback Bar presents only the locally configured Action Bar Names. It is a
 set-or-clear action palette rather than a complete status view. It has no
@@ -174,10 +194,10 @@ The bar's width is derived from its visible fixed-size actions, not from
 media-specific width buckets. Its primary row contains only
 Feedback Marks and media-specific tools; it has no persistent comment input.
 A separate item row scrolls Feedback Capsules within that width and always ends
-with one compact `+ Comment` Capsule. Activating that affordance
+with one compact `Comment` Capsule. Activating that affordance
 turns it in place into a new, always-editable Feedback Capsule. When that
 Capsule first loses focus with a non-empty value, Runtime creates the
-corresponding Feedback Item. Workbench immediately places a new `+ Comment`
+corresponding Feedback Item. Workbench immediately places a new `Comment`
 Capsule after the non-empty Capsule without waiting for Runtime acceptance. An
 empty new Capsule simply returns to the one trailing affordance. Every Capsule
 has its own stable identity before its first save, so multiple creations and
@@ -220,13 +240,13 @@ then scrolls internally instead of continuing to cover the Canvas.
 Escape only moves keyboard focus out of the Capsule. It never clears text,
 restores an older value, or introduces a separate cancel action. The resulting
 focus loss follows the same rules as any other: a non-empty value is saved, an
-empty new Capsule returns to `+ Comment`, and an existing Item left empty is
+empty new Capsule returns to `Comment`, and an existing Item left empty is
 deleted.
 
 Empty text means that no Feedback Item exists, but clearing a focused Capsule
 has no immediate side effect. The Capsule remains empty and its exact current
 value remains the Workbench value until focus moves away. At that point an empty
-new Capsule returns to the trailing `+ Comment` affordance, while an existing
+new Capsule returns to the trailing `Comment` affordance, while an existing
 Item requests deletion. Its empty Working Copy and Capsule remain until Runtime
 accepts that deletion, while its spatial geometry is absent from Workbench
 presentation because the current value no longer forms a Feedback Item. Runtime
@@ -238,7 +258,7 @@ interaction occurred.
 
 Selecting a tool, locking a video time, or placing spatial geometry without
 non-empty text creates a Feedback Composition, not a Feedback Item. After a
-spatial tool is selected, the trailing `+ Comment` Capsule remains visible and
+spatial tool is selected, the trailing `Comment` Capsule remains visible and
 unchanged while the Canvas awaits an actual placement. When spatial placement
 or video-moment lock completes, that trailing Capsule changes in place into the
 corresponding always-editable Capsule and receives focus automatically; the user
@@ -256,7 +276,10 @@ until Runtime accepts the same value. Pins and rectangles therefore remain at
 their current geometry without response-driven removal or recreation, and
 clearing an Item to empty hides its geometry immediately. Values for different
 visible Nodes render independently, including unsynchronized spatial Working
-Copies restored after reopening the Project.
+Copies restored after reopening the Project. The shared image-and-video spatial
+Feedback layer is painted above every raster preview layer so its pin and
+rectangle hit targets remain active, and below Canvas content/error and node
+controls so higher-authority Canvas chrome retains pointer priority.
 
 Each accepted item renders as the same always-editable Feedback Capsule.
 Spatial Capsules show their numeric label; moment Capsules use a stable palette
