@@ -351,11 +351,12 @@ is discarded by the existing runtime epoch and target identity checks.
 
 Once rasterization completes, source upload may continue while the lane advances
 to another target. Runtime stores the canonical source atomically. Image, text,
-and video callers then pass their selected source, target width, output policy,
-and source validator to one shared raster-variant service. That service owns
+and video callers then pass their selected source, target width, and source
+validator to one shared raster-variant service. That service owns
 width validation, equal-width direct-source return, keyed in-flight exclusion,
 Raster Preview Engine identity, resize/encode, atomic cache publication, and
-file response creation. Text selects alpha-preserving PNG output; the source
+file response creation. The transparent Text source carries an alpha channel,
+so the shared format rule selects alpha-preserving PNG output; the source
 producer does not reimplement variant generation.
 
 ## Variant Selection And Mounted Handoff

@@ -191,7 +191,7 @@ export function canvasTextPreviewTargetKey(target: CanvasTextPreviewTarget): Can
 }
 
 export interface CanvasTextPreviewCaptureResult {
-  sourcePng: Blob;
+  sourceImage: Blob;
   cssWidth: number;
   cssHeight: number;
   sourcePixelWidth: number;
@@ -309,14 +309,14 @@ export async function captureCanvasTextPreviewSource(input: {
       image.src = '';
     }
     throwIfCaptureAborted(input.signal);
-    const sourcePng = await canvas.convertToBlob({ type: 'image/png' });
+    const sourceImage = await canvas.convertToBlob({ type: 'image/png' });
     throwIfCaptureAborted(input.signal);
-    if (sourcePng.type !== 'image/png') {
+    if (sourceImage.type !== 'image/png') {
       throw new Error('Canvas text preview DOM raster did not produce a PNG blob.');
     }
     const completedAt = performance.now();
     return {
-      sourcePng,
+      sourceImage,
       cssWidth: input.target.contentCssWidth,
       cssHeight: input.target.contentCssHeight,
       sourcePixelWidth: input.target.sourcePixelWidth,

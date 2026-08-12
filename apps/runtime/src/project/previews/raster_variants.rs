@@ -14,20 +14,12 @@ use super::{
     resolve_no_symlink_existing_project_path,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RasterPreviewVariantOutputPolicy {
-    MatchSourceAlpha,
-    Png,
-    Jpeg,
-}
-
 pub(super) struct RasterPreviewVariantRequest {
     pub(super) source_path: PathBuf,
     pub(super) source_file: File,
     pub(super) source_content_type: Option<&'static str>,
     pub(super) cache_directory: String,
     pub(super) width: u32,
-    pub(super) output_policy: RasterPreviewVariantOutputPolicy,
     pub(super) invalid_width_message: String,
 }
 
@@ -93,7 +85,7 @@ impl RasterPreviewVariantService {
             });
         }
 
-        let output = output_for(request.output_policy, metadata);
+        let output = output_for(metadata);
         let variant_path = format!("{cache_base}.{}", output.extension);
         if let Some((absolute_path, file)) = existing_open_file(cache_root, &variant_path)? {
             verify_source()?;
@@ -137,29 +129,19 @@ struct RasterPreviewVariantOutput {
     content_type: &'static str,
 }
 
-fn output_for(
-    policy: RasterPreviewVariantOutputPolicy,
-    metadata: RasterMetadata,
-) -> RasterPreviewVariantOutput {
-    match policy {
-        RasterPreviewVariantOutputPolicy::Png => RasterPreviewVariantOutput {
+fn output_for(metadata: RasterMetadata) -> RasterPreviewVariantOutput {
+    if metadata.has_alpha {
+        RasterPreviewVariantOutput {
             extension: "png",
             format: RasterOutputFormat::Png,
             content_type: "image/png",
-        },
-        RasterPreviewVariantOutputPolicy::MatchSourceAlpha if metadata.has_alpha => {
-            RasterPreviewVariantOutput {
-                extension: "png",
-                format: RasterOutputFormat::Png,
-                content_type: "image/png",
-            }
         }
-        RasterPreviewVariantOutputPolicy::Jpeg
-        | RasterPreviewVariantOutputPolicy::MatchSourceAlpha => RasterPreviewVariantOutput {
+    } else {
+        RasterPreviewVariantOutput {
             extension: "jpg",
             format: RasterOutputFormat::Jpeg,
             content_type: "image/jpeg",
-        },
+        }
     }
 }
 

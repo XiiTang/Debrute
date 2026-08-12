@@ -987,7 +987,7 @@ pub(super) async fn video_preview_source_save(
         Err(error) => return invalid_input(error.to_string()),
     };
     let Some(source) = parts.files.get("source") else {
-        return invalid_input("Canvas video preview source PNG is required.");
+        return invalid_input("Canvas video preview source JPEG is required.");
     };
     let runtime = Arc::clone(&state.services);
     let session = match project_session(&runtime, &scope) {

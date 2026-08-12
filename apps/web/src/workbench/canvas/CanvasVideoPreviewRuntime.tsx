@@ -52,6 +52,7 @@ import type { CanvasRect } from './runtime/canvasGeometry';
 
 const MAX_CAPTURE_DIMENSION = 4096;
 const VIDEO_CAPTURE_TIMEOUT_MS = 30_000;
+const VIDEO_PREVIEW_SOURCE_JPEG_QUALITY = 0.95;
 
 class CanvasVideoFrameFailure extends Error {
   readonly stage: 'decode' | 'capture';
@@ -362,7 +363,7 @@ export function CanvasVideoPreviewProvider({
       return actions.saveCanvasVideoPreviewSource({
         ...canvasVideoPreviewTargetForApi(target),
         metadata: capture.metadata,
-        sourcePng: capture.sourcePng
+        sourceImage: capture.sourceImage
       }, request.abortController.signal).then((result) => {
         if (!mountedRef.current || captureRequestRef.current !== request || !isCurrentTarget(target)) return;
         publishSource(target, result.source.sourceWidth, result.source.metadata);
@@ -595,7 +596,7 @@ export function canvasVideoPreviewTargetsForNodes(
 export async function captureCanvasVideoFrame(
   target: CanvasVideoPreviewTarget,
   signal: AbortSignal
-): Promise<{ metadata: CanvasVideoMetadata; sourcePng: Blob }> {
+): Promise<{ metadata: CanvasVideoMetadata; sourceImage: Blob }> {
   const captureController = new AbortController();
   const forwardAbort = () => captureController.abort(signal.reason);
   signal.addEventListener('abort', forwardAbort, { once: true });
@@ -645,8 +646,8 @@ export async function captureCanvasVideoFrame(
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Canvas video preview capture context is unavailable.');
       context.drawImage(video, 0, 0, width, height);
-      const sourcePng = await canvasToPng(canvas, captureSignal);
-      return { metadata, sourcePng };
+      const sourceImage = await canvasToJpeg(canvas, captureSignal);
+      return { metadata, sourceImage };
     } catch (error) {
       if (isAbortError(error) || error instanceof CanvasVideoFrameFailure) throw error;
       throw new CanvasVideoFrameFailure('capture', messageFromUnknown(error));
@@ -721,7 +722,7 @@ function waitForPresentedVideoFrame(video: HTMLVideoElement, signal: AbortSignal
   });
 }
 
-function canvasToPng(canvas: HTMLCanvasElement, signal: AbortSignal): Promise<Blob> {
+function canvasToJpeg(canvas: HTMLCanvasElement, signal: AbortSignal): Promise<Blob> {
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (blob?: Blob, error?: Error) => {
@@ -729,8 +730,10 @@ function canvasToPng(canvas: HTMLCanvasElement, signal: AbortSignal): Promise<Bl
       settled = true;
       signal.removeEventListener('abort', onAbort);
       if (error) reject(error);
-      else if (blob) resolve(blob);
-      else reject(new Error('Browser could not encode the Canvas video preview PNG.'));
+      else if (!blob) reject(new Error('Browser could not encode the Canvas video preview JPEG.'));
+      else if (blob.type !== 'image/jpeg') {
+        reject(new Error(`Browser encoded the Canvas video preview as ${blob.type || 'an unknown format'} instead of JPEG.`));
+      } else resolve(blob);
     };
     const onAbort = () => finish(undefined, abortReason(signal));
     signal.addEventListener('abort', onAbort, { once: true });
@@ -742,7 +745,7 @@ function canvasToPng(canvas: HTMLCanvasElement, signal: AbortSignal): Promise<Bl
       } else {
         finish();
       }
-    }, 'image/png');
+    }, 'image/jpeg', VIDEO_PREVIEW_SOURCE_JPEG_QUALITY);
     if (signal.aborted) onAbort();
   });
 }

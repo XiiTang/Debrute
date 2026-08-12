@@ -957,7 +957,7 @@ function canvasTextPreviewSourceFormData(input: SaveCanvasTextPreviewSourceInput
     projectRelativePath: input.projectRelativePath,
     targetIdentity: input.targetIdentity
   }));
-  formData.append('source', input.sourcePng, 'source.png');
+  formData.append('source', input.sourceImage, 'source.png');
   return formData;
 }
 
@@ -969,7 +969,7 @@ function canvasVideoPreviewSourceFormData(input: SaveCanvasVideoPreviewSourceInp
     frameTimeMs: input.frameTimeMs,
     metadata: input.metadata
   }));
-  formData.set('source', input.sourcePng, 'source.png');
+  formData.set('source', input.sourceImage, 'source.jpg');
   return formData;
 }
 

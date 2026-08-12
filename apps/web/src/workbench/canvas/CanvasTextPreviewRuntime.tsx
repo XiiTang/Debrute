@@ -1046,12 +1046,12 @@ export function CanvasTextPreviewProvider({
     const startedAt = performance.now();
     recordTextPreviewCounter('text-preview-source-upload-started', {
       projectRelativePath: target.projectRelativePath,
-      bytes: raster.sourcePng.size,
+      bytes: raster.sourceImage.size,
       inFlight: 1
     });
     void actions.saveCanvasTextPreviewSource({
       ...canvasTextPreviewSourceTargetForApi(target),
-      sourcePng: raster.sourcePng
+      sourceImage: raster.sourceImage
     }).then(() => {
       if (!mountedRef.current || epoch !== runtimeEpochRef.current) {
         return;

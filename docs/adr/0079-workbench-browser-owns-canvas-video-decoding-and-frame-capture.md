@@ -13,7 +13,8 @@ decode result is the authority used by both the player and preview producer.
 Workbench maintains one bounded, serialized hidden capture lane. For each exact
 Source Revision and playback or Feedback Moment time it loads the Runtime's
 revisioned raw URL, waits for browser metadata and the requested frame, draws a
-bounded PNG, and submits that source to Runtime. Runtime remains the authority
+bounded frame, encodes it as JPEG at quality `0.95`, and submits that source to
+Runtime. Runtime remains the authority
 for Project path confinement, exact source leases, byte-range delivery, MIME
 mapping, capture validation, atomic cache files, raster width variants, and
 Feedback Artifact publication. The Feedback scheduler retains an exact missing

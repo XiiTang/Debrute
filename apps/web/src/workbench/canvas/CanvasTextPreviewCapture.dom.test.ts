@@ -63,7 +63,7 @@ describe('CanvasTextPreviewCapture', { tags: ['canvas-text'] }, () => {
     });
 
     expect(result).toMatchObject({
-      sourcePng: expect.objectContaining({ type: 'image/png' }),
+      sourceImage: expect.objectContaining({ type: 'image/png' }),
       cssWidth: 320,
       cssHeight: 160,
       sourcePixelWidth: 1280,

@@ -35,7 +35,7 @@ contracts that depend on those versions are executable:
   native payload for each supported macOS and Windows target.
 - Canvas video decoding, metadata, playback, and canonical still-frame capture
   use the Workbench browser engine. Runtime supplies the exact revisioned
-  Project URL and persists validated PNG captures; source development and
+  Project URL and persists validated JPEG captures; source development and
   Product assembly carry no separate video decoder payload.
 - Canvas text preview font subsetting uses the checked-in
   `assets/wasm/canvas-text-font-subset-v1.wasm`. Install, development, build,

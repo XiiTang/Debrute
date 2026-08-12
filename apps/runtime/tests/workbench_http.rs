@@ -1602,6 +1602,10 @@ fn video_preview_source_read_preserves_multiple_moments_for_one_video() {
     image::RgbaImage::new(2, 2)
         .save_with_format(&video, image::ImageFormat::Png)
         .expect("source fixture should be written");
+    let mut source_jpeg = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut source_jpeg, 95)
+        .encode_image(&image::RgbImage::new(2, 2))
+        .expect("browser capture fixture should be encoded");
     let client = test_client();
     let (cookie, credential, mut events) = open_unbound_connection(&client, &runtime);
     open_project(&client, &runtime, &project, &cookie, &credential);
@@ -1703,9 +1707,9 @@ fn video_preview_source_read_preserves_multiple_moments_for_one_video() {
                 )
                 .part(
                     "source",
-                    Part::bytes(fs::read(&video).unwrap())
-                        .file_name("source.png")
-                        .mime_str("image/png")
+                    Part::bytes(source_jpeg)
+                        .file_name("source.jpg")
+                        .mime_str("image/jpeg")
                         .unwrap(),
                 ),
         )
@@ -1742,7 +1746,7 @@ fn video_preview_source_read_preserves_multiple_moments_for_one_video() {
         .send()
         .expect("saved video preview should resolve");
     assert_eq!(response.status().as_u16(), 200);
-    assert_eq!(response.headers()[CONTENT_TYPE], "image/png");
+    assert_eq!(response.headers()[CONTENT_TYPE], "image/jpeg");
 }
 
 fn open_unbound_connection(client: &Client, runtime: &TestRuntime) -> (String, String, SseEvents) {

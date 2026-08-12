@@ -149,18 +149,20 @@ adopted by the visible playback preview.
 The capture lane creates a detached native `<video>` using the same revisioned
 raw URL as the player. It waits for browser metadata and the exact seek, uses
 `requestVideoFrameCallback` when available, draws one frame into a Canvas no
-larger than 4096 pixels on its longest edge, and encodes PNG. One capture has a
+larger than 4096 pixels on its longest edge, and encodes JPEG at quality `0.95`.
+One capture has a
 30-second deadline. Debrute does not preflight with `canPlayType()` or infer
 codec support from extension; the actual browser decode result is authoritative.
 Active players keep their existing preview and defer new hidden capture work
 for that path until playback no longer owns the media.
 
 Runtime validates the exact Project lease before and after publication. It
-accepts only a valid PNG of at most 64 MiB, with positive dimensions, a longest
+accepts only a valid JPEG of at most 64 MiB, with positive dimensions, a longest
 edge of at most 4096 pixels, and an aspect ratio matching the browser metadata.
 It atomically publishes each metadata and source file into the Runtime-owned cache.
-The source PNG then uses the same Runtime raster-variant service and JPEG output
-policy as the other preview media:
+The source JPEG then uses the same Runtime raster-variant service as the other
+preview media. Every derived width uses the source-alpha rule: an alpha channel
+produces PNG, while a source without alpha produces JPEG at quality `82`:
 
 Feedback artifact rendering reads the exact cached browser frame for each
 persisted Feedback Moment. A missing frame is pending derived work retained by
@@ -172,16 +174,16 @@ Workbench observes the Feedback entry and supplies the capture.
 
 ```text
 ~/.debrute/cache/roots/<rootKey>/canvas/canvas-video-previews/
-  <path-key>/<source-revision>/browser-v1/
+  <path-key>/<source-revision>/browser-v2/
     metadata.json
     frames/<frame-time-ms>/
-      source.png
+      source.jpg
       raster-engine-v<version>/
         preview-w<width>.jpg
 ```
 
 When the requested width reaches the source's intrinsic width, Runtime returns
-`source.png` directly rather than decoding and encoding an equal-width JPEG.
+`source.jpg` directly rather than decoding and encoding an equal-width JPEG.
 This creates no equal-width variant and consumes no Raster Preview Pool slot.
 Cache paths are derived state and are excluded from Project-visible content.
 Superseded Source Revisions and frame times do not participate in current

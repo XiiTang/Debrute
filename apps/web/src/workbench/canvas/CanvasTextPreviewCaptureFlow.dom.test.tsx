@@ -304,7 +304,7 @@ function targetFixture(projectRelativePath = 'notes/a.md'): CanvasTextPreviewCap
 
 function rasterResult(): CanvasTextPreviewCaptureResult {
   return {
-    sourcePng: new Blob(['png'], { type: 'image/png' }),
+    sourceImage: new Blob(['png'], { type: 'image/png' }),
     cssWidth: 320,
     cssHeight: 160,
     sourcePixelWidth: 1280,

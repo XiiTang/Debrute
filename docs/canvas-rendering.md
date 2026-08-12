@@ -364,10 +364,10 @@ belong to a dedicated design outside the Raster Preview Engine contract.
 Image, text, and video width variants are resolved by one Runtime raster-variant
 service and share one global Raster Preview Pool with capacity three. The
 service owns width validation, per-cache-key exclusion, evaluation of the
-caller-selected output policy, equal-width direct-source return, Raster Preview
+source-alpha format rule, equal-width direct-source return, Raster Preview
 Engine path identity, atomic publication, and response-file creation. Media-
-specific callers own source production, source-current validation, and their
-output policy. Feedback Artifact rendering may retain its own latest-only
+specific callers own source production and source-current validation. Feedback
+Artifact rendering may retain its own latest-only
 or serialized scheduling, but it consumes the same global slot while performing
 raster work. There are no per-media raster pools, dynamic weights, machine
 memory probing, or user-configurable concurrency. Browser metadata and
@@ -409,8 +409,9 @@ grayscale, higher-bit-depth, wide-gamut, and HDR inputs therefore converge on
 one Canvas display colour space; HDR gain maps are not retained in derived
 previews.
 
-The presence of an alpha channel selects RGBA PNG without an all-pixels alpha
-scan. Otherwise output is RGB JPEG at quality 82. Output strips source EXIF and
+Every Image, Text, and Video derived width follows one format rule. The presence
+of an alpha channel selects RGBA PNG without an all-pixels alpha scan. Otherwise
+output is RGB JPEG at quality 82. Output strips source EXIF and
 orientation tags, ICC, XMP, IPTC, GPS, embedded thumbnails, and other source
 metadata after the pixels have been oriented and converted. Runtime does not
 promise byte-identical encoder output across supported platforms, but it does
@@ -446,7 +447,7 @@ increment it automatically. `Version` identifies a code contract, while
 The shared variant service does not create an equal-width variant. When a requested
 width reaches a browser-displayable source's intrinsic width, its caller serves
 that exact revision-bound source: a Project file for an image, the canonical
-browser-captured PNG for text, or the browser-captured PNG for video.
+browser-captured PNG for text, or the browser-captured JPEG for video.
 This direct-source tier consumes no Raster Preview Pool slot and creates no
 `preview-w<source-width>` file. It retains the caller's source-identity checks
 and the same loaded/next visual handoff as lower-width variants. TIFF remains a

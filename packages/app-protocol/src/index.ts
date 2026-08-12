@@ -520,7 +520,7 @@ type CanvasTextPreviewSourceAvailabilityView = CanvasTextPreviewSourceTarget & (
 );
 
 export interface SaveCanvasTextPreviewSourceInput extends CanvasTextPreviewSourceTarget {
-  sourcePng: Blob;
+  sourceImage: Blob;
 }
 
 export interface SaveCanvasTextPreviewSourceResult {
@@ -574,7 +574,7 @@ export interface CanvasVideoPreviewSourceResponse {
 
 export interface SaveCanvasVideoPreviewSourceInput extends CanvasVideoPreviewTarget {
   metadata: CanvasVideoMetadata;
-  sourcePng: Blob;
+  sourceImage: Blob;
 }
 
 export interface SaveCanvasVideoPreviewSourceResult {

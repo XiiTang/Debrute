@@ -948,7 +948,7 @@ function immediateScheduler(overrides: Partial<CanvasPreviewResourceScheduler> =
 
 function rasterResult(): CanvasTextPreviewCaptureResult {
   return {
-    sourcePng: new Blob(['png'], { type: 'image/png' }),
+    sourceImage: new Blob(['png'], { type: 'image/png' }),
     cssWidth: 420,
     cssHeight: 248,
     sourcePixelWidth: 1680,

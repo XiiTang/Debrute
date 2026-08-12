@@ -38,9 +38,7 @@ use cache::{
 };
 use raster::RasterPreviewEngine;
 pub use raster::initialize_raster_preview_engine;
-use raster_variants::{
-    RasterPreviewVariantOutputPolicy, RasterPreviewVariantRequest, RasterPreviewVariantService,
-};
+use raster_variants::{RasterPreviewVariantRequest, RasterPreviewVariantService};
 
 pub(crate) const RASTER_PREVIEW_ENGINE_VERSION: u32 = 1;
 const MAX_TEXT_PREVIEW_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
@@ -321,7 +319,6 @@ impl ProjectPreviewService {
                 source_content_type: direct_image_content_type(&relative),
                 cache_directory,
                 width,
-                output_policy: RasterPreviewVariantOutputPolicy::MatchSourceAlpha,
                 invalid_width_message: format!(
                     "Canvas preview width exceeds source width: {relative}"
                 ),
@@ -426,7 +423,6 @@ impl ProjectPreviewService {
                 source_content_type: Some("image/png"),
                 cache_directory: text_preview_base_project_path(target)?,
                 width,
-                output_policy: RasterPreviewVariantOutputPolicy::Png,
                 invalid_width_message: format!(
                     "Canvas text preview width exceeds source width: {}",
                     target.project_relative_path

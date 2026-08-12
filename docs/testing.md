@@ -253,10 +253,10 @@ path.
 
 Canvas video tests separate browser production from Runtime storage. Workbench
 tests cover independent playback and Feedback Moment targets, the one serialized
-capture lane, source read/save requests, browser metadata projection, retry,
+capture lane, JPEG source read/save requests, browser metadata projection, retry,
 player handoff, active-player capture cancellation, and collapsed-video Feedback
 maintenance without an extra playback target. Runtime tests cover exact Project
-leases, multiple frame times under one Source Revision, PNG and aspect-ratio
+leases, multiple frame times under one Source Revision, JPEG and aspect-ratio
 validation, atomic cache files, raster variants, pending Feedback frames, and
 maintenance-resource recovery after a collapsed Project is reopened. Product
 assembly tests require schema 3 and prove that no separate video-tool payload or

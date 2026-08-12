@@ -13,9 +13,7 @@ use super::{
         KeyedLocks, atomic_write, project_relative_path_cache_key, project_revision_cache_key,
     },
     existing_open_file,
-    raster_variants::{
-        RasterPreviewVariantOutputPolicy, RasterPreviewVariantRequest, RasterPreviewVariantService,
-    },
+    raster_variants::{RasterPreviewVariantRequest, RasterPreviewVariantService},
 };
 use crate::project::{
     CANVAS_VIDEO_TIME_MAX_MS, CanvasMediaKind, ProjectError, ProjectRelativePath,
@@ -23,7 +21,7 @@ use crate::project::{
     project_media_revision, resolve_no_symlink_existing_project_path,
 };
 
-const BROWSER_CAPTURE_VERSION: &str = "browser-v1";
+const BROWSER_CAPTURE_VERSION: &str = "browser-v2";
 pub const CANVAS_VIDEO_PREVIEW_SOURCE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_CAPTURE_DIMENSION: u32 = 4096;
 const ASPECT_RATIO_TOLERANCE: f64 = 0.01;
@@ -128,16 +126,16 @@ impl CanvasVideoPreviewService {
             return Err(ProjectError::service(
                 "canvas_video_preview_source_too_large",
                 format!(
-                    "Canvas video preview PNG must be between 1 byte and {CANVAS_VIDEO_PREVIEW_SOURCE_MAX_BYTES} bytes."
+                    "Canvas video preview JPEG must be between 1 byte and {CANVAS_VIDEO_PREVIEW_SOURCE_MAX_BYTES} bytes."
                 ),
             ));
         }
         let bytes = fs::read(uploaded_source)?;
-        let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+        let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Jpeg)
             .map_err(|error| {
                 ProjectError::service(
                     "canvas_video_preview_source_invalid",
-                    format!("Canvas video preview source must be a valid PNG: {error}"),
+                    format!("Canvas video preview source must be a valid JPEG: {error}"),
                 )
             })?;
         let source_width = decoded.width();
@@ -149,7 +147,7 @@ impl CanvasVideoPreviewService {
             return Err(ProjectError::service(
                 "canvas_video_preview_source_dimensions_invalid",
                 format!(
-                    "Canvas video preview PNG longest edge must not exceed {MAX_CAPTURE_DIMENSION}px."
+                    "Canvas video preview JPEG longest edge must not exceed {MAX_CAPTURE_DIMENSION}px."
                 ),
             ));
         }
@@ -158,7 +156,7 @@ impl CanvasVideoPreviewService {
         if ((metadata_ratio - source_ratio) / metadata_ratio).abs() > ASPECT_RATIO_TOLERANCE {
             return Err(ProjectError::service(
                 "canvas_video_preview_source_aspect_ratio_mismatch",
-                "Canvas video preview PNG aspect ratio does not match browser metadata.",
+                "Canvas video preview JPEG aspect ratio does not match browser metadata.",
             ));
         }
 
@@ -174,7 +172,7 @@ impl CanvasVideoPreviewService {
         )?;
         atomic_write(
             &cache_root,
-            &format!("{base}/frames/{}/source.png", target.frame_time_ms),
+            &format!("{base}/frames/{}/source.jpg", target.frame_time_ms),
             &bytes,
         )?;
         lease.verify_current()?;
@@ -197,7 +195,7 @@ impl CanvasVideoPreviewService {
         validate_target(target)?;
         assert_target_matches_lease(lease, target)?;
         let cache_root = self.cache_root(lease.project_root())?;
-        let source_relative = source_png_path(target)?;
+        let source_relative = source_jpeg_path(target)?;
         let source = resolve_no_symlink_existing_project_path(
             &cache_root,
             ProjectRelativePath::parse(&source_relative)?.as_directory_path(),
@@ -212,14 +210,13 @@ impl CanvasVideoPreviewService {
             RasterPreviewVariantRequest {
                 source_path: source,
                 source_file: file,
-                source_content_type: Some("image/png"),
+                source_content_type: Some("image/jpeg"),
                 cache_directory: format!(
                     "{}/frames/{}",
                     source_base_path(target)?,
                     target.frame_time_ms
                 ),
                 width,
-                output_policy: RasterPreviewVariantOutputPolicy::Jpeg,
                 invalid_width_message: format!(
                     "Canvas video preview width exceeds source width: {}",
                     target.project_relative_path
@@ -267,7 +264,7 @@ impl CanvasVideoPreviewService {
             frame_time_ms,
         };
         let cache_root = self.cache_root(project_root)?;
-        let source_relative = source_png_path(&target)?;
+        let source_relative = source_jpeg_path(&target)?;
         let Some((source, mut file)) = existing_open_file(&cache_root, &source_relative)? else {
             return Err(ProjectError::service(
                 "canvas_feedback_video_source_pending",
@@ -295,7 +292,7 @@ impl CanvasVideoPreviewService {
         cancellation.check()?;
         let cache_root = self.cache_root(lease.project_root())?;
         let metadata = read_cached_metadata(&cache_root, target)?;
-        let Some((source, mut file)) = existing_open_file(&cache_root, &source_png_path(target)?)?
+        let Some((source, mut file)) = existing_open_file(&cache_root, &source_jpeg_path(target)?)?
         else {
             return Ok(CanvasVideoPreviewSourceStatus::Missing { metadata });
         };
@@ -389,9 +386,9 @@ fn source_base_path(target: &CanvasVideoPreviewTarget) -> Result<String, Project
     ))
 }
 
-fn source_png_path(target: &CanvasVideoPreviewTarget) -> Result<String, ProjectError> {
+fn source_jpeg_path(target: &CanvasVideoPreviewTarget) -> Result<String, ProjectError> {
     Ok(format!(
-        "{}/frames/{}/source.png",
+        "{}/frames/{}/source.jpg",
         source_base_path(target)?,
         target.frame_time_ms
     ))
@@ -426,7 +423,7 @@ fn seconds_to_frame_time_ms(seconds: f64) -> Result<u64, ProjectError> {
 mod tests {
     use std::sync::Arc;
 
-    use image::{ImageBuffer, Rgba};
+    use image::{ImageBuffer, Rgb};
     use uuid::Uuid;
 
     use super::*;
@@ -438,8 +435,8 @@ mod tests {
         let service = fixture.service();
         let first = fixture.target(0);
         let second = fixture.target(2_500);
-        let capture = fixture.root.join("capture.png");
-        ImageBuffer::from_pixel(16, 9, Rgba([10_u8, 20, 30, 255]))
+        let capture = fixture.root.join("capture.jpg");
+        ImageBuffer::from_pixel(16, 9, Rgb([10_u8, 20, 30]))
             .save(&capture)
             .unwrap();
         let metadata = CanvasVideoMetadata {
@@ -466,9 +463,11 @@ mod tests {
         ));
 
         let sources = service
-            .read_sources(&[first, second], &PreviewCancellation::default(), |_| {
-                Ok(fixture.lease())
-            })
+            .read_sources(
+                &[first.clone(), second],
+                &PreviewCancellation::default(),
+                |_| Ok(fixture.lease()),
+            )
             .unwrap();
         assert!(matches!(
             sources[0].status,
@@ -483,6 +482,20 @@ mod tests {
                 metadata: Some(cached),
             } if cached == metadata
         ));
+        let direct = service
+            .resolve_variant(
+                &fixture.lease(),
+                &first,
+                16,
+                &PreviewCancellation::default(),
+            )
+            .unwrap();
+        assert!(
+            direct
+                .absolute_path
+                .ends_with("browser-v2/frames/0/source.jpg")
+        );
+        assert_eq!(direct.content_type, "image/jpeg");
         let feedback_frame = service
             .feedback_frame(
                 &fixture.root,
@@ -495,12 +508,12 @@ mod tests {
     }
 
     #[test]
-    fn browser_source_save_rejects_non_png_and_wrong_aspect_ratio() {
+    fn browser_source_save_rejects_non_jpeg_and_wrong_aspect_ratio() {
         let fixture = Fixture::new("clip.mp4");
         let service = fixture.service();
         let target = fixture.target(0);
-        let invalid = fixture.root.join("invalid.png");
-        fs::write(&invalid, b"not a png").unwrap();
+        let invalid = fixture.root.join("invalid.jpg");
+        fs::write(&invalid, b"not a jpeg").unwrap();
         let metadata = CanvasVideoMetadata {
             width: 1_920,
             height: 1_080,
@@ -520,8 +533,8 @@ mod tests {
             "canvas_video_preview_source_invalid"
         );
 
-        let wrong_aspect = fixture.root.join("wrong-aspect.png");
-        ImageBuffer::from_pixel(8, 8, Rgba([0_u8, 0, 0, 255]))
+        let wrong_aspect = fixture.root.join("wrong-aspect.jpg");
+        ImageBuffer::from_pixel(8, 8, Rgb([0_u8, 0, 0]))
             .save(&wrong_aspect)
             .unwrap();
         assert_eq!(

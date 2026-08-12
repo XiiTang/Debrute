@@ -292,7 +292,7 @@ describe('Runtime Workbench connection', () => {
     await expect(client.saveCanvasVideoPreviewSource({
       ...target,
       metadata: { width: 1920, height: 1080, durationSeconds: 4 },
-      sourcePng: new Blob(['png'], { type: 'image/png' })
+      sourceImage: new Blob(['jpeg'], { type: 'image/jpeg' })
     })).resolves.toEqual({
       ok: true,
       source: { ...target, status: 'available', sourceWidth: 1920, metadata: { width: 1920, height: 1080 } }
@@ -303,6 +303,10 @@ describe('Runtime Workbench connection', () => {
     expect(save?.path).toBe('/api/workbench/bindings/project-1/canvas-video-previews/source');
     expect(JSON.parse(String(read?.init?.body))).toEqual({ targets: [target] });
     expect(save?.init?.body).toBeInstanceOf(FormData);
+    expect((save?.init?.body as FormData).get('source')).toMatchObject({
+      name: 'source.jpg',
+      type: 'image/jpeg'
+    });
     client.dispose();
   });
 

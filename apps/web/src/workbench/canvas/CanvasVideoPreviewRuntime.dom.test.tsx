@@ -17,6 +17,7 @@ import type {
 import type { CanvasPreviewOrderSource } from './CanvasRenderLifecycle';
 import {
   CanvasVideoPreviewProvider,
+  captureCanvasVideoFrame,
   canvasVideoPreviewTargetsForNodes,
   useCanvasVideoPreviewNode,
   useCanvasVideoPreviewRuntime,
@@ -86,6 +87,36 @@ describe('CanvasVideoPreviewRuntime', { tags: ['canvas-video'] }, () => {
     expect(() => canvasVideoPreviewTargetsForNodes([videoNode({
       fileUrl: 'http://127.0.0.1:17321/api/workbench/bindings/project-1/files/raw/media/a.mkv?v=rev-a'
     })])).toThrow('Canvas file URL must be a relative Runtime raw-file URL.');
+  });
+
+  it('captures the canonical video source as a high-quality JPEG', async () => {
+    const { video, drawImage, toBlob } = mockReadyVideoCapture('image/jpeg');
+
+    const result = await captureCanvasVideoFrame({
+      bindingId: 'project-1',
+      projectRelativePath: 'media/a.mp4',
+      sourceRevision: 'rev-a',
+      sourceUrl: '/api/workbench/bindings/project-1/files/raw/media/a.mp4?v=rev-a',
+      frameTimeMs: 0
+    }, new AbortController().signal);
+
+    expect(result.sourceImage.type).toBe('image/jpeg');
+    expect(toBlob).toHaveBeenCalledWith(expect.any(Function), 'image/jpeg', 0.95);
+    expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 1_920, 1_080);
+  });
+
+  it('rejects a browser format fallback instead of publishing a non-JPEG source', async () => {
+    mockReadyVideoCapture('image/png');
+
+    await expect(captureCanvasVideoFrame({
+      bindingId: 'project-1',
+      projectRelativePath: 'media/a.mp4',
+      sourceRevision: 'rev-a',
+      sourceUrl: '/api/workbench/bindings/project-1/files/raw/media/a.mp4?v=rev-a',
+      frameTimeMs: 0
+    }, new AbortController().signal)).rejects.toThrow(
+      'Browser encoded the Canvas video preview as image/png instead of JPEG.'
+    );
   });
 
   it('reads persisted Feedback Moments for a video outside the disclosed Canvas resources', async () => {
@@ -546,4 +577,28 @@ function deferred<T>() {
     resolvePromise = resolve;
   });
   return { promise, resolve: resolvePromise };
+}
+
+function mockReadyVideoCapture(encodedType: string) {
+  const createElement = document.createElement.bind(document);
+  const video = createElement('video');
+  Object.defineProperties(video, {
+    readyState: { value: HTMLMediaElement.HAVE_CURRENT_DATA },
+    videoWidth: { value: 1_920 },
+    videoHeight: { value: 1_080 },
+    duration: { value: 4 }
+  });
+  const canvas = createElement('canvas');
+  const drawImage = vi.fn();
+  vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+    if (tagName === 'video') return video;
+    if (tagName === 'canvas') return canvas;
+    return createElement(tagName, options);
+  }) as typeof document.createElement);
+  vi.spyOn(canvas, 'getContext').mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+  const toBlob = vi.spyOn(canvas, 'toBlob').mockImplementation((callback) => {
+    callback(new Blob([encodedType], { type: encodedType }));
+  });
+  vi.spyOn(video, 'load').mockImplementation(() => undefined);
+  return { video, drawImage, toBlob };
 }
