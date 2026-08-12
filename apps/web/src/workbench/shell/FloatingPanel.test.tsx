@@ -5,7 +5,7 @@ import { WorkbenchFloatingPanelShell } from './FloatingPanel';
 import { I18nProvider } from '../i18n';
 
 describe('FloatingPanel', () => {
-  it('renders the shared product shell title, body, resize handles, and close action', () => {
+  it('renders the shared product shell with a close-owned north-east corner', () => {
     const html = renderToStaticMarkup(
       <I18nProvider locale="en">
         <WorkbenchFloatingPanelShell
@@ -26,9 +26,10 @@ describe('FloatingPanel', () => {
     expect(html).toContain('class="floating-panel-drag-hit-area"');
     expect(html).toContain('class="floating-panel-title"');
     expect(html).toContain('floating-panel-body');
-    for (const direction of ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']) {
+    for (const direction of ['n', 's', 'e', 'w', 'nw', 'se', 'sw']) {
       expect(html).toContain(`floating-panel-resize-handle--${direction}`);
     }
+    expect(html).not.toContain('floating-panel-resize-handle--ne');
     expect(html).toContain('Close Explorer');
     expect(html).toContain('db-workbench-close-button');
     expect(html).toContain('>Explorer<');

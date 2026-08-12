@@ -14,8 +14,19 @@ import {
   FloatingWindowResizeHandles,
   floatingWindowRectStyle,
   useFloatingWindowGesture,
-  type FloatingWindowGesture
+  type FloatingWindowGesture,
+  type FloatingWindowResizeDirection
 } from './floatingWindowGesture';
+
+const WORKBENCH_PANEL_RESIZE_DIRECTIONS: readonly FloatingWindowResizeDirection[] = [
+  'n',
+  's',
+  'e',
+  'w',
+  'nw',
+  'se',
+  'sw'
+];
 
 const floatingPanelTitleKeys: Record<FloatingPanelId, WorkbenchTranslationKey> = {
   explorer: 'shell.panels.explorer',
@@ -57,7 +68,7 @@ export function WorkbenchFloatingPanelShell({
   return (
     <Panel
       ref={windowRef}
-      className={`floating-panel floating-panel-${panelId}`}
+      className={`floating-panel floating-panel--workbench-panel floating-panel-${panelId}`}
       data-testid={`floating-panel-${panelId}`}
       style={{
         ...floatingWindowRectStyle(layout),
@@ -79,7 +90,10 @@ export function WorkbenchFloatingPanelShell({
       <PanelBody className="floating-panel-body">
         {children}
       </PanelBody>
-      <FloatingWindowResizeHandles resizeHandleProps={gesture.resizeHandleProps} />
+      <FloatingWindowResizeHandles
+        resizeHandleProps={gesture.resizeHandleProps}
+        directions={WORKBENCH_PANEL_RESIZE_DIRECTIONS}
+      />
     </Panel>
   );
 }

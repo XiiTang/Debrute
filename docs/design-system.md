@@ -382,6 +382,12 @@ editors. `WorkbenchFloatingPanelShell` owns the shared panel frame, drag and
 resize surfaces, close placement, continuous background, and body overflow. The
 shell renders each panel name once.
 
+Each Workbench panel reserves its complete 18px north-east title slot for the
+close action while keeping the close glyph visually compact. Its resize geometry
+does not overlap that slot: there is no north-east diagonal resize handle, the
+north handle ends before the close slot, and the east handle begins below it.
+The floating text editor retains its own eight-direction resize geometry.
+
 Persistent Canvas controls occupy the lower Workbench region; upper
 panel-launch controls belong to Workbench chrome. This is both an ownership
 boundary and a stable placement convention. Mini Map, Reset Canvas Layout, and

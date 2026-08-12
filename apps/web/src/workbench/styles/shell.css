@@ -566,6 +566,10 @@ html[data-workbench-window-gesture="se"] * {
   pointer-events: auto;
 }
 
+.floating-panel--workbench-panel {
+  --db-floating-panel-close-hit-area-size: var(--db-floating-panel-drag-hit-area-height);
+}
+
 .floating-panel-interaction-row {
   position: relative;
   grid-row: 1;
@@ -602,11 +606,13 @@ html[data-workbench-window-gesture="se"] * {
   pointer-events: none;
 }
 
-.floating-panel-close-button {
+.floating-panel--workbench-panel .floating-panel-close-button {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 0;
+  right: 0;
   z-index: 5;
+  width: var(--db-floating-panel-close-hit-area-size);
+  height: var(--db-floating-panel-close-hit-area-size);
   pointer-events: auto;
 }
 
@@ -641,6 +647,10 @@ html[data-workbench-window-gesture="se"] * {
   top: 0;
 }
 
+.floating-panel--workbench-panel .floating-panel-resize-handle--n {
+  right: var(--db-floating-panel-close-hit-area-size);
+}
+
 .floating-panel-resize-handle--s {
   bottom: 0;
 }
@@ -655,6 +665,10 @@ html[data-workbench-window-gesture="se"] * {
 
 .floating-panel-resize-handle--e {
   right: 0;
+}
+
+.floating-panel--workbench-panel .floating-panel-resize-handle--e {
+  top: var(--db-floating-panel-close-hit-area-size);
 }
 
 .floating-panel-resize-handle--w {

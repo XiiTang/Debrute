@@ -193,13 +193,15 @@ export function useFloatingWindowGesture({
 }
 
 export function FloatingWindowResizeHandles({
-  resizeHandleProps
+  resizeHandleProps,
+  directions = FLOATING_WINDOW_RESIZE_DIRECTIONS
 }: {
   resizeHandleProps(direction: FloatingWindowResizeDirection): React.HTMLAttributes<HTMLElement>;
+  directions?: readonly FloatingWindowResizeDirection[];
 }): React.ReactElement {
   return (
     <>
-      {FLOATING_WINDOW_RESIZE_DIRECTIONS.map((direction) => (
+      {directions.map((direction) => (
         <div
           key={direction}
           className={`floating-panel-resize-handle floating-panel-resize-handle--${direction}`}
