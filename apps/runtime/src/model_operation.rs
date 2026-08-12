@@ -118,19 +118,6 @@ impl ModelOperationExecution {
             Self::Batch { .. } => &[],
         }
     }
-
-    #[must_use]
-    pub const fn batch_counts(&self) -> Option<(usize, usize, usize)> {
-        match self {
-            Self::Batch {
-                active,
-                succeeded,
-                failed,
-                ..
-            } => Some((*active, *succeeded, *failed)),
-            Self::Single { .. } => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -995,12 +982,6 @@ impl<Executor: ModelOperationExecutor> ModelOperationService<Executor> {
             operations: records.into_iter().map(OperationRecord::snapshot).collect(),
             next_cursor,
         })
-    }
-
-    #[cfg(test)]
-    #[must_use]
-    pub fn retained_terminal_count(&self) -> usize {
-        self.lock_state().terminal_order.len()
     }
 
     fn execute(self: &Arc<Self>, id: &str) {
@@ -2565,7 +2546,15 @@ mod tests {
         assert_eq!(outcomes[0].status(), BatchItemStatus::Failed);
         assert_eq!(outcomes[1].item_index, 1);
         assert_eq!(outcomes[1].status(), BatchItemStatus::Succeeded);
-        assert_eq!(terminal.execution.batch_counts(), Some((0, 1, 1)));
+        assert!(matches!(
+            terminal.execution,
+            ModelOperationExecution::Batch {
+                active: 0,
+                succeeded: 1,
+                failed: 1,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2738,7 +2727,7 @@ mod tests {
             })
             .expect("second page");
         assert_eq!(second.operations.len(), 75);
-        assert_eq!(fixture.service.retained_terminal_count(), 100);
+        assert!(second.next_cursor.is_none());
         assert_eq!(
             fixture
                 .service

@@ -55,6 +55,12 @@ pub(crate) enum ResolvedMediaReference {
     },
 }
 
+struct ParsedInputDataUrl<'a> {
+    mime_type: &'a str,
+    encoded: &'a str,
+    decoded_bytes: usize,
+}
+
 impl ResolvedMediaReference {
     pub(crate) fn is_public_url(&self) -> bool {
         matches!(self, Self::PublicUrl(_))
@@ -395,24 +401,17 @@ impl<'a> ExecutionContext<'a> {
             return Ok(ResolvedMediaReference::PublicUrl(reference.to_owned()));
         }
         if reference.starts_with("data:") {
-            let (decoded_bytes, mime_type_bytes) =
-                input_data_url_layout(reference, self.limits.input_media_item_bytes)?;
-            let mut request_bytes_reserved = decoded_bytes
-                .checked_add(mime_type_bytes)
+            let parsed = parse_input_data_url(reference, self.limits.input_media_item_bytes)?;
+            let request_bytes_reserved = parsed
+                .decoded_bytes
+                .checked_add(parsed.mime_type.len())
                 .ok_or_else(model_request_too_large)?;
             self.reserve_request_bytes(request_bytes_reserved)?;
-            let (mime_type, bytes) =
-                decode_data_url(reference, self.limits.input_media_item_bytes)?;
-            if bytes.len() != decoded_bytes {
-                let replacement = bytes
-                    .len()
-                    .checked_add(mime_type.len())
-                    .ok_or_else(model_request_too_large)?;
-                self.replace_request_bytes(request_bytes_reserved, replacement)?;
-                request_bytes_reserved = replacement;
-            }
+            let bytes = BASE64.decode(parsed.encoded).map_err(|error| {
+                ModelRequestError::new("model_request_input_invalid", error.to_string())
+            })?;
             return Ok(ResolvedMediaReference::Inline {
-                mime_type,
+                mime_type: parsed.mime_type.to_owned(),
                 bytes,
                 request_bytes_reserved,
             });
@@ -792,10 +791,10 @@ fn encoded_base64_len(bytes: usize) -> Result<usize, ModelRequestError> {
         .ok_or_else(model_request_too_large)
 }
 
-fn input_data_url_layout(
+fn parse_input_data_url(
     value: &str,
     maximum_bytes: usize,
-) -> Result<(usize, usize), ModelRequestError> {
+) -> Result<ParsedInputDataUrl<'_>, ModelRequestError> {
     let payload = value.strip_prefix("data:").ok_or_else(|| {
         ModelRequestError::new(
             "model_request_input_invalid",
@@ -839,7 +838,11 @@ fn input_data_url_layout(
     if decoded > maximum_bytes {
         return Err(input_media_too_large(maximum_bytes));
     }
-    Ok((decoded, mime_type.len()))
+    Ok(ParsedInputDataUrl {
+        mime_type,
+        encoded,
+        decoded_bytes: decoded,
+    })
 }
 
 fn model_request_too_large() -> ModelRequestError {
@@ -854,44 +857,6 @@ fn input_media_too_large(maximum_bytes: usize) -> ModelRequestError {
         "model_request_input_too_large",
         format!("Input media exceeds the {maximum_bytes}-byte item limit."),
     )
-}
-
-pub(crate) fn decode_data_url(
-    value: &str,
-    maximum_bytes: usize,
-) -> Result<(String, Vec<u8>), ModelRequestError> {
-    let (metadata, encoded) = value.split_once(',').ok_or_else(|| {
-        ModelRequestError::new(
-            "model_request_input_invalid",
-            "Media data URL is malformed.",
-        )
-    })?;
-    let mime = metadata
-        .strip_prefix("data:")
-        .and_then(|value| value.strip_suffix(";base64"))
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            ModelRequestError::new(
-                "model_request_input_invalid",
-                "Media data URL must contain base64 bytes and a MIME type.",
-            )
-        })?;
-    if encoded.len() > maximum_bytes.saturating_mul(4) / 3 + 8 {
-        return Err(ModelRequestError::new(
-            "model_request_input_too_large",
-            "Media data URL exceeds the input limit.",
-        ));
-    }
-    let bytes = BASE64.decode(encoded).map_err(|error| {
-        ModelRequestError::new("model_request_input_invalid", error.to_string())
-    })?;
-    if bytes.len() > maximum_bytes {
-        return Err(ModelRequestError::new(
-            "model_request_input_too_large",
-            "Media data URL exceeds the input limit.",
-        ));
-    }
-    Ok((mime.to_owned(), bytes))
 }
 
 pub(crate) fn mime_from_response(response: &ModelHttpResponse) -> Option<String> {
