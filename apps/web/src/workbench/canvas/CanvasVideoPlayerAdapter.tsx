@@ -19,7 +19,6 @@ import type { ProjectedCanvasNode } from './CanvasScene';
 export interface CanvasVideoPlayerHandle {
   readCurrentTimeSeconds(): number | undefined;
   pauseAt(seconds: number): void;
-  restorePersistedTime(currentTimeMs: number): void;
 }
 
 export interface CanvasVideoPlaybackToggleRequest {
@@ -35,7 +34,6 @@ export interface CanvasVideoPlayerAdapterProps {
   formatSeekError: (projectRelativePath: string, seconds: number) => string;
   onError: (message: string) => void;
   onPlayingChange: (playing: boolean) => void;
-  onPlaybackBoundary: (currentTimeMs: number) => void;
   onReadyForDisplay?: (() => void) | undefined;
   onPlaybackToggleRequestConsumed?: ((requestId: number) => void) | undefined;
 }
@@ -49,42 +47,20 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
   formatSeekError,
   onError,
   onPlayingChange,
-  onPlaybackBoundary,
   onReadyForDisplay,
   onPlaybackToggleRequestConsumed
 }, ref) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const lastPlaybackBoundaryRef = useRef<number | undefined>(undefined);
   const consumedPlaybackToggleRequestIdRef = useRef<number | undefined>(undefined);
   const readyForDisplayRef = useRef(false);
   const displayReadinessFailedRef = useRef(false);
-  const pendingInitialSeekRef = useRef(false);
+  const pendingInitialSeekRef = useRef(initialTimeMs > 0);
+  const initialSeekStartedRef = useRef(false);
   const source = node.availability.state === 'available' ? node.availability.fileUrl : '';
   const textTracks = (node.videoTextTracks ?? []).map((track) => ({
     ...track,
     fileUrl: requiredVideoCompanionFileUrl(node, track.projectRelativePath, track.fileUrl)
   }));
-
-  const publishPlaybackBoundary = useCallback((currentTimeSeconds: number) => {
-    const currentTimeMs = normalizeCanvasVideoPlaybackTimeMs(
-      Number.isFinite(currentTimeSeconds) && currentTimeSeconds > 0
-        ? Math.round(currentTimeSeconds * 1000)
-        : 0
-    );
-    if (lastPlaybackBoundaryRef.current === currentTimeMs) {
-      return;
-    }
-    lastPlaybackBoundaryRef.current = currentTimeMs;
-    onPlaybackBoundary(currentTimeMs);
-  }, [onPlaybackBoundary]);
-
-  const reportReadyForDisplay = useCallback(() => {
-    if (readyForDisplayRef.current || displayReadinessFailedRef.current) {
-      return;
-    }
-    readyForDisplayRef.current = true;
-    onReadyForDisplay?.();
-  }, [onReadyForDisplay]);
 
   const reportInitialSeekError = useCallback((message: string) => {
     displayReadinessFailedRef.current = true;
@@ -92,53 +68,78 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
     onError(message);
   }, [onError]);
 
-  const handleLoadedMetadata = useCallback((event: React.SyntheticEvent<HTMLVideoElement>) => {
-    if (initialTimeMs <= 0) {
+  const startInitialSeek = useCallback((video: HTMLVideoElement) => {
+    if (
+      initialTimeMs <= 0
+      || initialSeekStartedRef.current
+      || displayReadinessFailedRef.current
+    ) {
       return;
     }
     const initialTimeSeconds = initialTimeMs / 1000;
     const message = formatSeekError(node.projectRelativePath, initialTimeSeconds);
-    const duration = Number.isFinite(event.currentTarget.duration)
-      ? event.currentTarget.duration
+    const duration = Number.isFinite(video.duration)
+      ? video.duration
       : node.videoMetadata?.durationSeconds;
     if (duration !== undefined && initialTimeSeconds > duration) {
       reportInitialSeekError(message);
       return;
     }
+    initialSeekStartedRef.current = true;
     try {
-      pendingInitialSeekRef.current = true;
-      event.currentTarget.currentTime = initialTimeSeconds;
+      video.currentTime = initialTimeSeconds;
     } catch {
       reportInitialSeekError(message);
     }
-  }, [formatSeekError, initialTimeMs, node.projectRelativePath, reportInitialSeekError]);
+  }, [formatSeekError, initialTimeMs, node.projectRelativePath, node.videoMetadata?.durationSeconds, reportInitialSeekError]);
 
-  const handleDisplayDataReady = useCallback(() => {
-    if (!pendingInitialSeekRef.current) {
-      reportReadyForDisplay();
+  const syncReadyForDisplay = useCallback((video: HTMLVideoElement | null) => {
+    if (
+      !video
+      || readyForDisplayRef.current
+      || displayReadinessFailedRef.current
+    ) {
+      return;
     }
-  }, [reportReadyForDisplay]);
+    if (pendingInitialSeekRef.current) {
+      if (!initialSeekStartedRef.current) {
+        if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+          startInitialSeek(video);
+        }
+        return;
+      }
+      const initialTimeSeconds = initialTimeMs / 1000;
+      if (video.seeking || Math.abs(video.currentTime - initialTimeSeconds) > 0.001) {
+        return;
+      }
+      pendingInitialSeekRef.current = false;
+    }
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      return;
+    }
+    readyForDisplayRef.current = true;
+    onReadyForDisplay?.();
+  }, [initialTimeMs, onReadyForDisplay, startInitialSeek]);
+
+  const handleLoadedMetadata = useCallback((event: React.SyntheticEvent<HTMLVideoElement>) => {
+    startInitialSeek(event.currentTarget);
+  }, [startInitialSeek]);
 
   const handleSeeked = useCallback((event: React.SyntheticEvent<HTMLVideoElement>) => {
-    const video = event.currentTarget;
-    if (pendingInitialSeekRef.current) {
-      pendingInitialSeekRef.current = false;
-      publishPlaybackBoundary(video.currentTime);
-      reportReadyForDisplay();
-      return;
-    }
-    if (video.paused) {
-      publishPlaybackBoundary(video.currentTime);
-    }
-  }, [publishPlaybackBoundary, reportReadyForDisplay]);
+    syncReadyForDisplay(event.currentTarget);
+  }, [syncReadyForDisplay]);
 
-  useEffect(() => () => {
+  useEffect(() => {
     const video = videoRef.current;
-    if (!video || !Number.isFinite(video.currentTime) || video.currentTime <= 0 || video.ended) {
+    syncReadyForDisplay(video);
+    if (!video || initialTimeMs <= 0 || readyForDisplayRef.current || displayReadinessFailedRef.current) {
       return;
     }
-    publishPlaybackBoundary(video.currentTime);
-  }, [publishPlaybackBoundary]);
+    const frameId = requestAnimationFrame(() => {
+      syncReadyForDisplay(video);
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [initialTimeMs, syncReadyForDisplay]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -176,19 +177,9 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
       const currentTimeSeconds = normalizeCanvasVideoPlaybackTimeMs(Math.round(Math.max(0, seconds) * 1000)) / 1000;
       video.pause();
       video.currentTime = currentTimeSeconds;
-      publishPlaybackBoundary(currentTimeSeconds);
-      onPlayingChange(false);
-    },
-    restorePersistedTime: (currentTimeMs) => {
-      const video = videoRef.current;
-      if (!video) return;
-      const normalizedTimeMs = normalizeCanvasVideoPlaybackTimeMs(currentTimeMs);
-      video.pause();
-      lastPlaybackBoundaryRef.current = normalizedTimeMs;
-      video.currentTime = normalizedTimeMs / 1000;
       onPlayingChange(false);
     }
-  }), [onPlayingChange, publishPlaybackBoundary]);
+  }), [onPlayingChange]);
 
   return (
     <div className="canvas-video-player">
@@ -200,18 +191,15 @@ export const CanvasVideoPlayerAdapter = forwardRef<CanvasVideoPlayerHandle, Canv
           preload="metadata"
           playsInline
           onLoadedMetadata={handleLoadedMetadata}
-          onLoadedData={handleDisplayDataReady}
-          onCanPlay={handleDisplayDataReady}
+          onLoadedData={(event) => syncReadyForDisplay(event.currentTarget)}
+          onCanPlay={(event) => syncReadyForDisplay(event.currentTarget)}
           onSeeked={handleSeeked}
           onPlay={() => onPlayingChange(true)}
-          onPause={(event) => {
-            onPlayingChange(false);
-            publishPlaybackBoundary(event.currentTarget.currentTime);
-          }}
+          onPlaying={(event) => syncReadyForDisplay(event.currentTarget)}
+          onPause={() => onPlayingChange(false)}
           onEnded={(event) => {
             onPlayingChange(false);
             event.currentTarget.currentTime = 0;
-            publishPlaybackBoundary(0);
           }}
           onError={() => onError(formatPlayError(node.projectRelativePath))}
         >

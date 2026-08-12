@@ -60,11 +60,12 @@ stores only a non-negative safe-integer millisecond timestamp on video file node
 zero removes the stored playback field. Browser media time is converted to and
 from seconds only at the player adapter boundary.
 
-Workbench writes Playback Position at playback boundaries such as pause, ended
-playback, player unload, Canvas switch, and Project close. It does not persist
-continuous `timeupdate` events. Volume, mute, playback rate, captions,
-fullscreen, picture-in-picture, loading state, errors, player mounting, and
-one-shot playback-toggle requests remain transient browser or Workbench state.
+Workbench writes Playback Position only when a mounted player becomes eligible
+for preview handoff and unload. Pause, seek, ended playback, Canvas switch,
+Project close, and continuous `timeupdate` events do not independently persist
+it. Volume, mute, playback rate, captions, fullscreen, picture-in-picture,
+loading state, errors, player mounting, and one-shot playback-toggle requests
+remain transient browser or Workbench state.
 
 ## Inactive Preview And Active Player
 
@@ -106,13 +107,15 @@ later switch can reuse it without another load. Source path, raw URL, revision,
 or availability changes replace the Preview Continuity Key, making every stale
 layer ineligible immediately.
 
-The player remains mounted until the preview has actually committed. If the
-video is reactivated first, reactivation invalidates only the pending retirement
-and reuses that same player. A late preview may remain cached but cannot replace
-reactivated content. Viewport culling never stops playback. Leaving the Canvas
-projection through ancestor collapse, deletion, Project change, or Canvas close
-does stop and unmount media; there is no player registry outside projected
-nodes.
+The player remains mounted until the exact Playback Position has persisted and
+the matching preview has actually committed. If persistence or preview
+generation fails, unload is cancelled without rolling the live player back to
+older persisted state. If the video is reactivated first, reactivation
+invalidates only the pending unload and reuses that same player. A late preview
+may remain cached but cannot replace reactivated content. Viewport culling never
+stops playback. Leaving the Canvas projection through ancestor collapse,
+deletion, Project change, or Canvas close does stop and unmount media; there is
+no player registry outside projected nodes.
 
 ## Video Preview Sources
 

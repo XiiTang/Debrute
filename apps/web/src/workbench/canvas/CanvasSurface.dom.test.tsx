@@ -71,12 +71,10 @@ const emptyCanvasState: CanvasState = {
 
 const {
   videoPauseAtSpy,
-  videoRestorePersistedTimeSpy,
   videoReadCurrentTimeSecondsSpy,
   videoMockState
 } = vi.hoisted(() => ({
   videoPauseAtSpy: vi.fn(),
-  videoRestorePersistedTimeSpy: vi.fn(),
   videoReadCurrentTimeSecondsSpy: vi.fn(() => 4.25),
   videoMockState: {
     registerOnMount: true,
@@ -102,15 +100,13 @@ vi.mock('./CanvasVideoNodeContent', async () => {
       onRegisterVideoTarget: (projectRelativePath: string, target: {
         readCurrentTimeSeconds: () => number | undefined;
         pauseAt: (seconds: number) => void;
-        restorePersistedTime: (seconds: number) => void;
       } | undefined) => void;
       onUpdatePlaybackTime: (projectRelativePath: string, currentTimeMs: number) => void | Promise<void>;
     }) => {
       ReactModule.useEffect(() => {
         const target = {
           readCurrentTimeSeconds: videoReadCurrentTimeSecondsSpy,
-          pauseAt: videoPauseAtSpy,
-          restorePersistedTime: videoRestorePersistedTimeSpy
+          pauseAt: videoPauseAtSpy
         };
         videoMockState.lastPath = node.projectRelativePath;
         videoMockState.lastRegister = onRegisterVideoTarget as typeof videoMockState.lastRegister;
@@ -158,7 +154,8 @@ describe('CanvasSurface', () => {
 
   beforeEach(() => {
     installTextPreviewStyleVariables();
-    videoRestorePersistedTimeSpy.mockReset();
+    videoPauseAtSpy.mockReset();
+    videoReadCurrentTimeSecondsSpy.mockClear();
     videoMockState.lastUpdatePlaybackTime = undefined;
   });
 
@@ -1836,7 +1833,7 @@ describe('CanvasSurface', () => {
     expect(html.match(/data-canvas-node-zone="content"/g) ?? []).toHaveLength(2);
   });
 
-  it('restores the durable video position when Runtime rejects persistence', async () => {
+  it('leaves the live video untouched when Runtime rejects persistence', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -1878,7 +1875,7 @@ describe('CanvasSurface', () => {
       expect(updateCanvasVideoPlaybackState).toHaveBeenCalledWith({
         updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeMs: 8_250 }]
       });
-      expect(videoRestorePersistedTimeSpy).toHaveBeenCalledWith(2_500);
+      expect(videoPauseAtSpy).not.toHaveBeenCalled();
     } finally {
       await act(async () => {
         root.unmount();
@@ -1936,7 +1933,7 @@ describe('CanvasSurface', () => {
       expect(updateCanvasVideoPlaybackState).toHaveBeenNthCalledWith(2, {
         updates: [{ projectRelativePath: videoNode.projectRelativePath, currentTimeMs: 9_500 }]
       });
-      expect(videoRestorePersistedTimeSpy).not.toHaveBeenCalled();
+      expect(videoPauseAtSpy).not.toHaveBeenCalled();
     } finally {
       await act(async () => {
         root.unmount();
@@ -2015,8 +2012,7 @@ describe('CanvasSurface', () => {
       await act(async () => {
         videoMockState.lastRegister?.(videoNode.projectRelativePath, {
           readCurrentTimeSeconds: videoReadCurrentTimeSecondsSpy,
-          pauseAt: videoPauseAtSpy,
-          restorePersistedTime: videoRestorePersistedTimeSpy
+          pauseAt: videoPauseAtSpy
         });
       });
 

@@ -714,6 +714,21 @@ function assertGenericNodeGeometryValues(label, stage, values) {
 }
 
 async function assertCanvasVideoInteractionWorkflow(page, label) {
+  const playbackStateRequests = [];
+  const recordPlaybackStateRequest = (request) => {
+    if (request.method() !== 'PATCH' || !request.url().includes('/canvas/state')) {
+      return;
+    }
+    try {
+      const body = request.postDataJSON();
+      if (body?.nodeStateUpdates?.some((update) => update.videoPlayback !== undefined)) {
+        playbackStateRequests.push(body);
+      }
+    } catch {
+      // Non-JSON Canvas requests are irrelevant to this assertion.
+    }
+  };
+  page.on('request', recordPlaybackStateRequest);
   const videoNode = page.locator(
     `[data-canvas-node-kind="file"][data-canvas-media-kind="video"][data-project-relative-path="${fixtureVideoPath}"]`
   );
@@ -808,6 +823,13 @@ async function assertCanvasVideoInteractionWorkflow(page, label) {
     && node.querySelector('video') instanceof HTMLVideoElement
     && !node.querySelector('video').paused
   ), await videoNode.elementHandle(), { timeout: 5000 });
+  await page.waitForFunction((node) => node.querySelector('video')?.currentTime >= 0.75, await videoNode.elementHandle(), {
+    timeout: 10000
+  }).catch(async (error) => {
+    throw new Error(`[${label}] Canvas video did not advance before pause: ${JSON.stringify(await canvasVideoBrowserState(videoNode))}.`, {
+      cause: error
+    });
+  });
 
   await clickVisibleElementPoint(page, video, label, 'mounted inactive Canvas video');
   await page.waitForFunction((node) => {
@@ -820,16 +842,89 @@ async function assertCanvasVideoInteractionWorkflow(page, label) {
   if (mountedClickCalls.play !== 1 || mountedClickCalls.pause !== 1) {
     throw new Error(`[${label}] mounted inactive video click did not perform exactly one local pause: ${JSON.stringify(mountedClickCalls)}.`);
   }
+  const pausedAtMs = await video.evaluate((media) => Math.round(media.currentTime * 1000));
+  if (pausedAtMs < 750) {
+    throw new Error(`[${label}] Canvas video did not reach a non-zero unload position: ${pausedAtMs}ms.`);
+  }
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  if (playbackStateRequests.length !== 0) {
+    throw new Error(`[${label}] active pause persisted Playback Position before unload: ${JSON.stringify(playbackStateRequests)}.`);
+  }
 
   await dockButton.click();
   await page.waitForFunction((node) => node.querySelector('video') === null, await videoNode.elementHandle(), {
     timeout: 10000
+  }).catch(async (error) => {
+    throw new Error(`[${label}] Canvas video did not unload after persistence: ${JSON.stringify(await canvasVideoBrowserState(videoNode))}.`, {
+      cause: error
+    });
   });
   await preview.waitFor({ state: 'visible', timeout: 10000 });
+  const persistedPlaybackUpdates = playbackStateRequests.flatMap((body) => body.nodeStateUpdates ?? [])
+    .filter((update) => update.videoPlayback !== undefined);
+  if (persistedPlaybackUpdates.length !== 1
+    || persistedPlaybackUpdates[0].videoPlayback.currentTimeMs !== pausedAtMs) {
+    throw new Error(`[${label}] Canvas video unload did not persist exactly ${pausedAtMs}ms once: ${JSON.stringify(playbackStateRequests)}.`);
+  }
+  const previewSrc = await preview.evaluate((image) => image.currentSrc || image.src);
+  const previewFrameTimeMs = Number(new URL(previewSrc).searchParams.get('frameTimeMs'));
+  if (previewFrameTimeMs !== pausedAtMs) {
+    throw new Error(`[${label}] unloaded Canvas video preview used ${previewFrameTimeMs}ms instead of ${pausedAtMs}ms.`);
+  }
+
+  await clickVisibleElementPoint(page, preview, label, 'unloaded Canvas video preview');
+  const resumedVideo = videoNode.locator('video').first();
+  await resumedVideo.waitFor({ state: 'attached', timeout: 10000 });
+  await videoNode.locator(
+    '[data-canvas-video-layer="player"]:not(.canvas-video-layer--hidden)'
+  ).waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForFunction((input) => {
+    const media = input.node.querySelector('video');
+    return media instanceof HTMLVideoElement
+      && !media.paused
+      && media.currentTime >= input.minimumTimeSeconds;
+  }, {
+    node: await videoNode.elementHandle(),
+    minimumTimeSeconds: pausedAtMs / 1000 + 0.05
+  }, { timeout: 10000 });
+  const resumedAtMs = await resumedVideo.evaluate((media) => {
+    media.pause();
+    return Math.round(media.currentTime * 1000);
+  });
+  if (resumedAtMs < pausedAtMs || resumedAtMs > pausedAtMs + 500) {
+    throw new Error(`[${label}] remounted Canvas video resumed at ${resumedAtMs}ms instead of near ${pausedAtMs}ms.`);
+  }
+  await dockButton.click();
+  await page.waitForFunction((node) => node.querySelector('video') === null, await videoNode.elementHandle(), {
+    timeout: 10000
+  }).catch(async (error) => {
+    throw new Error(`[${label}] remounted Canvas video did not unload after the second click-away: ${JSON.stringify(await canvasVideoBrowserState(videoNode))}.`, {
+      cause: error
+    });
+  });
   await page.evaluate(() => {
     window.__debruteBrowserVideoObserver?.disconnect();
   });
-  console.log(`[${label}] Video first-click handoff, Workbench click-away, concurrent-playing residency, local mounted click, and paused inactive retirement passed.`);
+  page.off('request', recordPlaybackStateRequest);
+  console.log(`[${label}] Video pause, exact unload preview, and remounted Playback Position passed at ${pausedAtMs}ms -> ${previewFrameTimeMs}ms -> ${resumedAtMs}ms.`);
+}
+
+async function canvasVideoBrowserState(videoNode) {
+  return videoNode.evaluate((node) => {
+    const media = node.querySelector('video');
+    const layer = node.querySelector('[data-canvas-video-layer="player"]');
+    return media instanceof HTMLVideoElement ? {
+      currentTime: media.currentTime,
+      duration: media.duration,
+      paused: media.paused,
+      readyState: media.readyState,
+      contentActive: node.getAttribute('data-canvas-content-active'),
+      layerClassName: layer?.className
+    } : {
+      media: 'unmounted',
+      contentActive: node.getAttribute('data-canvas-content-active')
+    };
+  });
 }
 
 async function assertCanvasAudioWorkflow(page, label) {

@@ -17,6 +17,15 @@ import type { CanvasRasterPreviewRequest } from './CanvasRasterPreviewPresentati
 import { I18nProvider } from '../i18n';
 
 const runtimeMocks = vi.hoisted(() => ({ retryPreview: vi.fn() }));
+const playerMocks = vi.hoisted(() => {
+  const state: { currentTimeSeconds: number | undefined } = { currentTimeSeconds: 4.25 };
+  return {
+    state,
+    readCurrentTimeSeconds: vi.fn(() => state.currentTimeSeconds),
+    pauseAt: vi.fn(),
+    mountCount: 0
+  };
+});
 
 vi.mock('./CanvasVideoPreviewRuntime', () => ({
   useCanvasVideoPreviewRuntime: () => runtimeMocks
@@ -68,7 +77,6 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       initialTimeMs,
       onError,
       onPlayingChange,
-      onPlaybackBoundary,
       onReadyForDisplay,
       playbackToggleRequest,
       contentInteractionActive,
@@ -78,7 +86,6 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
       initialTimeMs: number;
       onError: (message: string) => void;
       onPlayingChange: (playing: boolean) => void;
-      onPlaybackBoundary: (currentTimeMs: number) => void;
       onReadyForDisplay: () => void;
       playbackToggleRequest?: { requestId: number } | undefined;
       contentInteractionActive?: boolean | undefined;
@@ -86,16 +93,17 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
     },
     ref: React.ForwardedRef<unknown>
   ) {
+    const [instanceId] = React.useState(() => ++playerMocks.mountCount);
     React.useImperativeHandle(ref, () => ({
-      readCurrentTimeSeconds: vi.fn(),
-      pauseAt: vi.fn(),
-      restorePersistedTime: vi.fn()
+      readCurrentTimeSeconds: playerMocks.readCurrentTimeSeconds,
+      pauseAt: playerMocks.pauseAt
     }), []);
     return (
       <div
         data-testid="video-player-adapter"
         data-path={node.projectRelativePath}
         data-initial-time={initialTimeMs}
+        data-instance-id={instanceId}
         data-playback-toggle-request-id={playbackToggleRequest?.requestId}
         data-content-active={contentInteractionActive ? 'true' : 'false'}
       >
@@ -112,10 +120,7 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
         <button
           type="button"
           data-testid="mock-video-paused"
-          onClick={() => {
-            onPlayingChange(false);
-            onPlaybackBoundary(4_250);
-          }}
+          onClick={() => onPlayingChange(false)}
         >
           paused
         </button>
@@ -123,8 +128,8 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
           type="button"
           data-testid="mock-video-ended"
           onClick={() => {
+            playerMocks.state.currentTimeSeconds = 0;
             onPlayingChange(false);
-            onPlaybackBoundary(0);
           }}
         >
           ended
@@ -137,6 +142,10 @@ vi.mock('./CanvasVideoPlayerAdapter', () => ({
 afterEach(() => {
   vi.restoreAllMocks();
   runtimeMocks.retryPreview.mockReset();
+  playerMocks.state.currentTimeSeconds = 4.25;
+  playerMocks.readCurrentTimeSeconds.mockClear();
+  playerMocks.pauseAt.mockClear();
+  playerMocks.mountCount = 0;
 });
 
 function CanvasVideoNodeContent(
@@ -426,7 +435,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('unloads the pending player when preview-to-player handoff is cancelled before display readiness', async () => {
+  it('keeps the pending player mounted when preview-to-player handoff is cancelled before display readiness', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -483,7 +492,8 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       });
 
       expect(videoPreviewIsVisible(container)).toBe(true);
-      expect(container.querySelector('[data-testid="video-player-adapter"]')).toBeNull();
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+      expect(playerMocks.readCurrentTimeSeconds).not.toHaveBeenCalled();
     } finally {
       await act(async () => {
         root.unmount();
@@ -706,11 +716,11 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('persists the pause boundary and unloads the player after the inactive preview is ready', async () => {
+  it('captures Playback Position only when the paused player becomes content-inactive', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const onUpdatePlaybackTime = vi.fn();
+    const onUpdatePlaybackTime = vi.fn(async () => undefined);
 
     try {
       await act(async () => {
@@ -734,7 +744,7 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       await act(async () => {
         button(container, 'mock-video-paused').click();
       });
-      expect(onUpdatePlaybackTime).toHaveBeenLastCalledWith('media/clip.mp4', 4_250);
+      expect(onUpdatePlaybackTime).not.toHaveBeenCalled();
       expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
 
       await act(async () => {
@@ -743,7 +753,24 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
             <CanvasVideoNodeContent
               node={videoNode()}
               contentInteractionActive={false}
-              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(playerMocks.readCurrentTimeSeconds).toHaveBeenCalledOnce();
+      expect(onUpdatePlaybackTime).toHaveBeenCalledOnce();
+      expect(onUpdatePlaybackTime).toHaveBeenCalledWith('media/clip.mp4', 4_250);
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ currentTimeMs: 4_250 })}
+              contentInteractionActive={false}
               onRegisterVideoTarget={() => undefined}
               onUpdatePlaybackTime={onUpdatePlaybackTime}
             />
@@ -777,11 +804,266 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('keeps the player mounted after ended playback while content-active', async () => {
+  it('keeps the same player and current time when Playback Position persistence fails', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const onUpdatePlaybackTime = vi.fn();
+    const persistence = deferred<void>();
+    const onUpdatePlaybackTime = vi.fn(() => persistence.promise);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        button(container, 'mock-video-ready').click();
+        button(container, 'mock-video-paused').click();
+      });
+      const instanceId = playerInstanceId(container);
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive={false}
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        persistence.reject(new Error('save failed'));
+        await persistence.promise.catch(() => undefined);
+      });
+
+      expect(playerInstanceId(container)).toBe(instanceId);
+      expect(playerMocks.state.currentTimeSeconds).toBe(4.25);
+      expect(videoPreviewIsVisible(container)).toBe(false);
+      expect(onUpdatePlaybackTime).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('reuses the same player when reactivated during pending persistence', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const persistence = deferred<void>();
+    const onUpdatePlaybackTime = vi.fn(() => persistence.promise);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        button(container, 'mock-video-ready').click();
+        button(container, 'mock-video-paused').click();
+      });
+      const instanceId = playerInstanceId(container);
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive={false}
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        persistence.resolve();
+        await persistence.promise;
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ currentTimeMs: 4_250 })}
+              contentInteractionActive
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(playerInstanceId(container)).toBe(instanceId);
+      expect(videoPreviewIsVisible(container)).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('cancels unload when the matching preview fails and does not resume it automatically', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onUpdatePlaybackTime = vi.fn(async () => undefined);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        button(container, 'mock-video-ready').click();
+        button(container, 'mock-video-paused').click();
+      });
+      const instanceId = playerInstanceId(container);
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode()}
+              contentInteractionActive={false}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ currentTimeMs: 4_250 })}
+              contentInteractionActive={false}
+              videoPreviewError="preview failed"
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ currentTimeMs: 4_250 })}
+              contentInteractionActive={false}
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(playerInstanceId(container)).toBe(instanceId);
+      expect(videoPreviewIsVisible(container)).toBe(false);
+      expect(onUpdatePlaybackTime).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('unloads without a redundant write when the captured position is already persisted', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onUpdatePlaybackTime = vi.fn(async () => undefined);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ currentTimeMs: 4_250 })}
+              contentInteractionActive
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+      await act(async () => {
+        button(container, 'mock-video-ready').click();
+        button(container, 'mock-video-paused').click();
+      });
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ currentTimeMs: 4_250 })}
+              contentInteractionActive={false}
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(onUpdatePlaybackTime).not.toHaveBeenCalled();
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).toBeNull();
+      expect(videoPreviewIsVisible(container)).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('persists ended position zero only after the player becomes content-inactive', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onUpdatePlaybackTime = vi.fn(async () => undefined);
 
     try {
       await act(async () => {
@@ -799,12 +1081,33 @@ describe('CanvasVideoNodeContent', { tags: ['canvas-video'] }, () => {
       });
 
       await act(async () => {
+        button(container, 'mock-video-ready').click();
+      });
+      await act(async () => {
         button(container, 'mock-video-ended').click();
       });
 
-      expect(onUpdatePlaybackTime).toHaveBeenLastCalledWith('media/clip.mp4', 0);
+      expect(onUpdatePlaybackTime).not.toHaveBeenCalled();
       expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
       expect(videoPreviewIsVisible(container)).toBe(false);
+
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <CanvasVideoNodeContent
+              node={videoNode({ currentTimeMs: 4_250 })}
+              contentInteractionActive={false}
+              videoPreviewRequest={previewSource()}
+              onRegisterVideoTarget={() => undefined}
+              onUpdatePlaybackTime={onUpdatePlaybackTime}
+            />
+          </I18nProvider>
+        );
+      });
+
+      expect(onUpdatePlaybackTime).toHaveBeenCalledOnce();
+      expect(onUpdatePlaybackTime).toHaveBeenCalledWith('media/clip.mp4', 0);
+      expect(container.querySelector('[data-testid="video-player-adapter"]')).not.toBeNull();
     } finally {
       await act(async () => {
         root.unmount();
@@ -1036,6 +1339,28 @@ function button(container: HTMLElement, testId: string): HTMLButtonElement {
     throw new Error(`Missing button: ${testId}`);
   }
   return element;
+}
+
+function playerInstanceId(container: ParentNode): string {
+  const instanceId = container.querySelector('[data-testid="video-player-adapter"]')?.getAttribute('data-instance-id');
+  if (!instanceId) {
+    throw new Error('Expected mounted video player adapter.');
+  }
+  return instanceId;
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 function videoPreviewIsVisible(container: ParentNode): boolean {

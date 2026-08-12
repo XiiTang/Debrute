@@ -1041,13 +1041,6 @@ function CanvasSurfaceRuntime({
         return;
       }
       videoPlaybackUpdateVersionsRef.current.delete(updateKey);
-      const durableNode = runtime.scene.getAcceptedNode(projectRelativePath);
-      if (durableNode?.mediaKind !== 'video') {
-        return;
-      }
-      videoTargetsRef.current
-        .get(projectRelativePath)
-        ?.restorePersistedTime(durableNode.videoPlayback?.currentTimeMs ?? 0);
       throw error;
     });
   }, [actions, runtime]);

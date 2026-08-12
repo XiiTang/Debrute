@@ -224,8 +224,9 @@ position is transient interaction state rather than a Text Viewport.
 _Avoid_: Editor focus, capture viewport
 
 **Playback Position**:
-The persisted non-negative integer millisecond video timestamp shared by an
-active player and the derived still preview used when that player is inactive.
+The persisted non-negative integer millisecond video timestamp captured from a
+mounted player when it becomes eligible to unmount and shared by its inactive
+derived still preview and the next player mounted for that Canvas Node.
 _Avoid_: Player time, playback session
 
 **Canvas Maintenance Job**:
