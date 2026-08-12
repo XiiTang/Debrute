@@ -74,8 +74,13 @@ export interface HttpWorkbenchApiClient extends WorkbenchApiClient {
   readonly activities: WorkbenchActivities;
   readonly globalProjection: WorkbenchGlobalProjection;
   readonly projectProjection: WorkbenchProjectProjection;
+  connectionEnvironment(): WorkbenchConnectionEnvironment;
   initialProjectRoot(): string | undefined;
   bootstrapGlobalSettings(): Promise<WorkbenchGlobalSettingsBootstrap>;
+}
+
+export interface WorkbenchConnectionEnvironment {
+  userHome: string;
 }
 
 export interface WorkbenchGlobalSettingsBootstrap {
@@ -122,6 +127,7 @@ export function createHttpWorkbenchApiClient(options: {
   let terminalHubLoad: Promise<TerminalHubClient> | undefined;
   let terminalBinding: { bindingId: string; connectionCredential: string } | undefined;
   let connectionCredential: string | undefined;
+  let connectionEnvironment: WorkbenchConnectionEnvironment | undefined;
   let globalSettingsBootstrap: WorkbenchGlobalSettingsBootstrap | undefined;
   let globalSettingsBootstrapError: Error | undefined;
   let desktopInitialProjectRoot: string | undefined;
@@ -515,6 +521,7 @@ export function createHttpWorkbenchApiClient(options: {
         await readJsonSseStream(response, (value) => {
           if (isConnectionOpenedFrame(value)) {
             connectionCredential = value.connectionCredential;
+            connectionEnvironment = value.environment;
             return;
           }
           if (isGlobalSnapshotFrame(value)) {
@@ -633,6 +640,12 @@ export function createHttpWorkbenchApiClient(options: {
     activities,
     globalProjection,
     projectProjection,
+    connectionEnvironment: () => {
+      if (!connectionEnvironment) {
+        throw new Error('Runtime has not opened the Workbench connection.');
+      }
+      return connectionEnvironment;
+    },
     initialProjectRoot: () => desktopInitialProjectRoot,
     bootstrapGlobalSettings,
     reportActivityNotice: (input) => isProjectScopedActivityNotice(input)
@@ -853,6 +866,7 @@ export function createHttpWorkbenchApiClient(options: {
       terminalHub?.dispose();
       activities.dispose();
       connectionCredential = undefined;
+      connectionEnvironment = undefined;
       const error = new Error('Workbench API client was disposed.');
       projectProjection.endConnection(error);
       for (const waiters of boundProjectWaiters.values()) {
@@ -875,10 +889,15 @@ function isProjectScopedActivityNotice(input: WorkbenchActivityNoticeInput): boo
 function isConnectionOpenedFrame(value: unknown): value is {
   type: 'connection.opened';
   connectionCredential: string;
+  environment: WorkbenchConnectionEnvironment;
 } {
   return isObject(value)
     && value.type === 'connection.opened'
-    && typeof value.connectionCredential === 'string';
+    && typeof value.connectionCredential === 'string'
+    && value.connectionCredential.length > 0
+    && isObject(value.environment)
+    && typeof value.environment.userHome === 'string'
+    && value.environment.userHome.length > 0;
 }
 
 function isRecognizedConnectionFrame(value: unknown): value is Record<string, unknown> & { type: string } {

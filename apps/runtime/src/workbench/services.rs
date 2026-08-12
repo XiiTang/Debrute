@@ -141,6 +141,7 @@ struct PreparedWorkbenchProjectBinding {
 }
 
 pub struct WorkbenchRuntimeServices {
+    user_home: String,
     runtime_state: Arc<RuntimeControlState>,
     models: Arc<ModelCatalog>,
     global: Arc<GlobalRuntimeService>,
@@ -216,6 +217,18 @@ impl WorkbenchRuntimeServices {
         project_watcher: ProjectWatcherComposition,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         let debrute_home = debrute_home.as_ref().to_path_buf();
+        let user_home = debrute_home
+            .parent()
+            .and_then(Path::to_str)
+            .filter(|path| !path.is_empty())
+            .ok_or_else(|| {
+                RuntimeHttpServiceError::new(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "user_home_unavailable",
+                    "Runtime user home must be representable as UTF-8.",
+                )
+            })?
+            .to_owned();
         let workers = RuntimeWorkerServices::new();
         let previews = Arc::new(crate::project::ProjectPreviewService::new_with_home(
             &debrute_home,
@@ -351,6 +364,7 @@ impl WorkbenchRuntimeServices {
         let connections = Arc::new(WorkbenchConnectionRegistry::new());
         let connection_closer = WorkbenchConnectionCloser::start(Arc::clone(&connections));
         let services = Arc::new(Self {
+            user_home,
             runtime_state,
             models: catalog,
             global,
@@ -386,6 +400,11 @@ impl WorkbenchRuntimeServices {
     #[must_use]
     pub fn global(&self) -> &Arc<GlobalRuntimeService> {
         &self.global
+    }
+
+    #[must_use]
+    pub fn user_home(&self) -> &str {
+        &self.user_home
     }
 
     pub(crate) fn canvas_source_digests(

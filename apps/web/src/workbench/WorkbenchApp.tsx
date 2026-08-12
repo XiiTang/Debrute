@@ -492,6 +492,7 @@ function WorkbenchBoundProjectApp({
   projectBindingLifecycle: ProjectBindingLifecycle;
   isProjectOpening: boolean;
 }): React.ReactElement {
+  const connectionEnvironment = api.connectionEnvironment();
   const projectOpenAttemptedPath = projectOpenPresentation.attemptedPath;
   const projectOpenError = projectOpenPresentation.error;
   const activityBellRef = useRef<HTMLButtonElement>(null);
@@ -1521,6 +1522,7 @@ function WorkbenchBoundProjectApp({
       projectOpenError={projectOpenError}
       projectOpening={isProjectOpening}
       recentProjectRoots={presentationController.settings.chrome.recentProjectRoots}
+      recentProjectUserHome={connectionEnvironment.userHome}
       onOpenRecentProject={openRecentProject}
       actions={actions}
       textFileBuffers={textFileBuffers}

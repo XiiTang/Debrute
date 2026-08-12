@@ -9,7 +9,9 @@ describe('ProjectOpenPanel', () => {
       <I18nProvider locale="en">
         <ProjectOpenPanel
           opening={false}
+          platform="darwin"
           recentProjectRoots={[]}
+          userHome="/Users/cq"
           onOpenProject={() => undefined}
           onOpenRecentProject={() => undefined}
         />
@@ -28,7 +30,9 @@ describe('ProjectOpenPanel', () => {
           error="Could not open project"
           attemptedPath="/missing/project"
           opening={false}
+          platform="darwin"
           recentProjectRoots={[]}
+          userHome="/Users/cq"
           onOpenProject={() => undefined}
           onOpenRecentProject={() => undefined}
         />
@@ -53,7 +57,9 @@ describe('ProjectOpenPanel', () => {
       <I18nProvider locale="en">
         <ProjectOpenPanel
           opening
+          platform="darwin"
           recentProjectRoots={[]}
+          userHome="/Users/cq"
           onOpenProject={() => undefined}
           onOpenRecentProject={() => undefined}
         />
@@ -73,7 +79,9 @@ describe('ProjectOpenPanel', () => {
           attemptedPath="/damaged/project"
           error="Project root could not be opened"
           opening={false}
+          platform="darwin"
           recentProjectRoots={[]}
+          userHome="/Users/cq"
           onOpenProject={() => undefined}
           onOpenRecentProject={() => undefined}
         />
@@ -88,6 +96,7 @@ describe('ProjectOpenPanel', () => {
       <I18nProvider locale="en">
         <ProjectOpenPanel
           opening={false}
+          platform="darwin"
           recentProjectRoots={[
             '/Users/cq/Projects/Alpha',
             'C:\\Beta',
@@ -96,6 +105,7 @@ describe('ProjectOpenPanel', () => {
             '/projects/epsilon',
             '/projects/not-rendered'
           ]}
+          userHome="/Users/cq"
           onOpenProject={() => undefined}
           onOpenRecentProject={() => undefined}
         />
@@ -104,7 +114,7 @@ describe('ProjectOpenPanel', () => {
 
     expect(html).toContain('Recent');
     expect(html).toContain('Alpha');
-    expect(html).toContain('/Users/cq/Projects');
+    expect(html).toContain('~/Projects');
     expect(html).toContain('aria-label="Open recent Project Alpha at /Users/cq/Projects/Alpha"');
     expect(html).toContain('Beta');
     expect(html).toContain('C:\\');
@@ -119,7 +129,9 @@ describe('ProjectOpenPanel', () => {
       <I18nProvider locale="en">
         <ProjectOpenPanel
           opening={false}
+          platform="darwin"
           recentProjectRoots={[]}
+          userHome="/Users/cq"
           onOpenProject={() => undefined}
           onOpenRecentProject={() => undefined}
         />
@@ -135,7 +147,9 @@ describe('ProjectOpenPanel', () => {
       <I18nProvider locale="en">
         <ProjectOpenPanel
           opening={false}
+          platform="darwin"
           recentProjectRoots={['/', 'C:\\']}
+          userHome="/Users/cq"
           onOpenProject={() => undefined}
           onOpenRecentProject={() => undefined}
         />

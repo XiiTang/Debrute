@@ -439,12 +439,21 @@ full-viewport surface. The title, Open Project action, and Recent list are
 centered as one group within the main viewport below the title-bar hit area, so
 adding Recent naturally places Open Project above the viewport midpoint. Recent
 shows at most the first five Runtime-global MRU roots as whole-row buttons with
-a folder icon, folder basename, and muted parent path. An empty list retains the
-Recent heading and shows `No Recent Projects`. Clicking or keyboard-activating a
-row opens it in the current Workbench through the ordinary Project-binding
-lifecycle. A failed or stale root returns to Project Open with the attempted path
-and error, without deleting or reordering the stored recent root. The File menu
-remains the owner of the complete recent list and Clear Recent command.
+a folder icon, the Project folder name, and a muted parent path. The Project name
+owns the row's available text width: the path yields all of its width before an
+overlong name is ellipsized, without increasing the one-line row height. On
+macOS, a path inside the current user's home uses `~`; Windows paths retain their
+drive or UNC root. The full friendly parent path is shown when it fits. When it
+does not, the path keeps its root and nearest parent around a middle ellipsis,
+such as `~/…/Acme`, and may disappear completely when the Project name needs the
+row. The canonical root remains the open target and the tooltip and accessible
+description; this friendly formatting applies only to the unbound Project Open
+surface. An empty list retains the Recent heading and shows
+`No Recent Projects`. Clicking or keyboard-activating a row opens it in the
+current Workbench through the ordinary Project-binding lifecycle. A failed or
+stale root returns to Project Open with the attempted path and error, without
+deleting or reordering the stored recent root. The File menu remains the owner
+of the complete recent list and Clear Recent command.
 
 A Project whose command authority was removed by preemption or an ended Runtime
 connection keeps its last confirmed Canvas visible but frozen. A solid,

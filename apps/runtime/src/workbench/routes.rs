@@ -148,7 +148,10 @@ pub(super) async fn workbench_connection(
     if sender
         .try_send(json!({
             "type": "connection.opened",
-            "connectionCredential": context.credential
+            "connectionCredential": context.credential,
+            "environment": {
+                "userHome": services.user_home()
+            }
         }))
         .is_err()
     {

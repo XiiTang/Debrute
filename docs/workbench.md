@@ -27,8 +27,11 @@ general-purpose controls or panel shells.
 shell, focused controllers, Project binding lifecycle, Project projection,
 Canvas runtime, editors, and feature views. The HTTP client owns one long-lived
 POST SSE Workbench connection, its in-memory command credential, wire delivery,
-and command/revision waiting. It does not own the accepted Project projection or
-frontend binding lifecycle. Concurrent ordinary-browser tabs share their storage
+immutable connection environment, and command/revision waiting. The environment
+supplies connection-local presentation context such as the current user's home
+directory; it is not Global Settings and does not alter canonical Recent Project
+roots. The client does not own the accepted Project projection or frontend
+binding lifecycle. Concurrent ordinary-browser tabs share their storage
 partition's HttpOnly browser session but retain independent connections,
 credentials, and Project bindings. The client never reconnects or automatically
 replays a command; unexpected connection end becomes a terminal connection state

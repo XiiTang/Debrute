@@ -2751,6 +2751,7 @@ describe('CanvasSurface', () => {
         hasProject
         projectOpening={false}
         recentProjectRoots={[]}
+        recentProjectUserHome="/Users/tester"
         onOpenRecentProject={async () => undefined}
         actions={actions}
         textFileBuffers={{}}

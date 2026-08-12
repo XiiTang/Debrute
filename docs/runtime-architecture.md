@@ -259,17 +259,20 @@ atomically when consumed. A failed startup Project activation is shown as a
 native Desktop error without creating another Workbench window.
 
 Each loaded Workbench opens one POST SSE connection at
-`/api/workbench/connection`. Its first frames establish an in-memory connection
-credential and the complete Global Settings snapshot before any requested
-Project binding work. The settings frame is sufficient to apply locale, theme,
-and Canvas Text Appearance before React mounts. Project preparation follows in
-blocking-worker work and therefore cannot delay that frame; it later yields
-either a Project binding or an explicit open failure. A browser session may
-contain multiple document connections; commands send one connection's
-credential in a same-origin header and Runtime validates the cookie and
-credential together. There are no split Global/Project connections, reconnect
-window, heartbeat, unload release, or automatic request replay. Unexpected
-connection end is a terminal page state; refreshing creates a new connection.
+`/api/workbench/connection`. Its first frame establishes an in-memory connection
+credential and immutable connection environment, including the current user's
+home directory for Workbench-local path presentation. That environment is
+connection context rather than revisioned Global Settings or Recent Project
+data. The complete Global Settings snapshot follows before any requested Project
+binding work and is sufficient to apply locale, theme, and Canvas Text Appearance
+before React mounts. Project preparation follows in blocking-worker work and
+therefore cannot delay that frame; it later yields either a Project binding or
+an explicit open failure. A browser session may contain multiple document
+connections; commands send one connection's credential in a same-origin header
+and Runtime validates the cookie and credential together. There are no split
+Global/Project connections, reconnect window, heartbeat, unload release, or
+automatic request replay. Unexpected connection end is a terminal page state;
+refreshing creates a new connection.
 
 Global Settings, live Photoshop state, and packaged Product state are
 independent resources carried by the initial stream and subsequent ordered

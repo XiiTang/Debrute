@@ -69,6 +69,9 @@ const apiState = vi.hoisted(() => {
         }
         return state.activities;
       }
+      if (property === 'connectionEnvironment') {
+        return () => ({ userHome: '/Users/tester' });
+      }
       const value = Reflect.get(state.api, property, state.api);
       if (property === 'openProject' && typeof value === 'function') {
         return async (...args: unknown[]) => {

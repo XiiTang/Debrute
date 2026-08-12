@@ -20,6 +20,7 @@ export function CanvasEditor({
   projectOpenError,
   projectOpening,
   recentProjectRoots,
+  recentProjectUserHome,
   onOpenRecentProject,
   actions,
   textFileBuffers,
@@ -45,6 +46,7 @@ export function CanvasEditor({
   projectOpenError?: string | undefined;
   projectOpening: boolean;
   recentProjectRoots: readonly string[];
+  recentProjectUserHome: string;
   onOpenRecentProject(projectRoot: string): Promise<void>;
   actions: CanvasEditorActions;
   textFileBuffers: Record<string, TextFileBuffer>;
@@ -75,7 +77,9 @@ export function CanvasEditor({
         attemptedPath={projectOpenAttemptedPath}
         error={projectOpenError}
         opening={projectOpening}
+        productPlatform={productPlatform}
         recentProjectRoots={recentProjectRoots}
+        recentProjectUserHome={recentProjectUserHome}
         onOpenProject={actions.openProject}
         onOpenRecentProject={onOpenRecentProject}
       />
@@ -205,6 +209,8 @@ function EmptyCanvas({
   error,
   opening,
   recentProjectRoots,
+  recentProjectUserHome,
+  productPlatform,
   onOpenProject,
   onOpenRecentProject
 }: {
@@ -213,6 +219,8 @@ function EmptyCanvas({
   error?: string | undefined;
   opening: boolean;
   recentProjectRoots: readonly string[];
+  recentProjectUserHome: string;
+  productPlatform: DebruteProductPlatform;
   onOpenProject(): Promise<void>;
   onOpenRecentProject(projectRoot: string): Promise<void>;
 }): React.ReactElement {
@@ -223,7 +231,9 @@ function EmptyCanvas({
           attemptedPath={attemptedPath}
           error={error}
           opening={opening}
+          platform={productPlatform}
           recentProjectRoots={recentProjectRoots}
+          userHome={recentProjectUserHome}
           onOpenProject={() => { void onOpenProject(); }}
           onOpenRecentProject={(projectRoot) => { void onOpenRecentProject(projectRoot); }}
         />

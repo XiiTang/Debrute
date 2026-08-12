@@ -631,6 +631,10 @@ fn one_post_stream_bootstraps_global_state_and_binds_a_project() {
     let mut events = SseEvents::new(response);
     let opened = events.next();
     assert_eq!(opened["type"], "connection.opened");
+    assert_eq!(
+        opened["environment"]["userHome"],
+        runtime.root.to_string_lossy().as_ref()
+    );
     let credential = opened["connectionCredential"]
         .as_str()
         .expect("connection credential should be present")

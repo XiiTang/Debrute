@@ -15,6 +15,9 @@ describe('Runtime Workbench connection', () => {
       globalRevision: 1,
       settings: {}
     });
+    expect(client.connectionEnvironment()).toEqual({
+      userHome: '/Users/tester'
+    });
     expect(harness.calls.map((call) => call.path)).toEqual(['/api/workbench/connection']);
     client.dispose();
   });
@@ -597,7 +600,10 @@ function createHarness(
           streamController = controller;
           controller.enqueue(sse(encoder, {
             type: 'connection.opened',
-            connectionCredential: 'connection-1'
+            connectionCredential: 'connection-1',
+            environment: {
+              userHome: '/Users/tester'
+            }
           }));
           controller.enqueue(sse(encoder, {
             type: 'global.snapshot',

@@ -41,6 +41,7 @@ describe('CanvasEditor', () => {
             hasProject
             projectOpening={false}
             recentProjectRoots={[]}
+            recentProjectUserHome="/Users/tester"
             onOpenRecentProject={async () => undefined}
             actions={actions}
             textFileBuffers={textFileBuffers}
@@ -61,6 +62,7 @@ describe('CanvasEditor', () => {
             projectOpenError="unrelated project-open presentation update"
             projectOpening={false}
             recentProjectRoots={[]}
+            recentProjectUserHome="/Users/tester"
             onOpenRecentProject={async () => undefined}
             actions={actions}
             textFileBuffers={textFileBuffers}

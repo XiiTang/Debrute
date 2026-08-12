@@ -89,28 +89,50 @@
   min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: var(--db-space-2);
 }
 
 .project-open-panel__recent-project-text strong,
-.project-open-panel__recent-project-text span {
+.project-open-panel__recent-project-path-value {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .project-open-panel__recent-project-text strong {
-  flex: 0 1 auto;
+  max-width: 100%;
+  flex: 0 0 auto;
   color: inherit;
   font-family: var(--db-font-body);
   font-size: var(--db-font-sm);
   font-weight: 600;
 }
 
-.project-open-panel__recent-project-text span {
-  flex: 1 1 auto;
+.project-open-panel__recent-project-path {
+  min-width: 0;
+  flex: 1 1 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.project-open-panel__recent-project-path-value,
+.project-open-panel__recent-project-path-measure {
+  box-sizing: border-box;
+  padding-left: var(--db-space-2);
   color: var(--db-text-subtle);
   font-size: var(--db-font-xs);
+}
+
+.project-open-panel__recent-project-path-value {
+  display: block;
+}
+
+.project-open-panel__recent-project-path-measure {
+  width: max-content;
+  position: absolute;
+  inset: 0 auto auto 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .project-open-panel__recent-empty {
