@@ -31,8 +31,9 @@ export interface DestinationTreeItemPresentation {
   children: DestinationTreeNodePresentation[];
 }
 
-export interface DestinationTreeLoadingPresentation {
-  kind: 'loading';
+export interface DestinationTreeStatePresentation {
+  kind: 'state';
+  state: 'loading' | 'error' | 'missing';
   key: string;
   label: string;
   depth: number;
@@ -40,7 +41,7 @@ export interface DestinationTreeLoadingPresentation {
 
 export type DestinationTreeNodePresentation =
   | DestinationTreeItemPresentation
-  | DestinationTreeLoadingPresentation;
+  | DestinationTreeStatePresentation;
 
 export interface DestinationTreePresentation {
   roots: DestinationTreeItemPresentation[];
@@ -95,27 +96,17 @@ export function destinationTreePresentation(
     .map((project): DestinationTreeItemPresentation => {
       const key = treeIdentity(project.canonicalRoot, '');
       const isExpanded = expanded.has(key);
-      const tree = snapshot.directoryTrees.find((candidate) => (
-        candidate.canonicalRoot === project.canonicalRoot
-        && candidate.projectRevision === project.revision
-      ));
       let children: DestinationTreeNodePresentation[] = [];
       if (isExpanded) {
-        children = !tree || tree.status === 'loading'
-          ? [{
-              kind: 'loading',
-              key: `${key}:loading`,
-              label: 'Loading directories…',
-              depth: 1
-            }]
-          : directoryTreeChildren({
-              canonicalRoot: project.canonicalRoot,
-              directories: tree.directories,
-              parentDirectory: '',
-              depth: 1,
-              expanded,
-              selected
-            });
+        children = directoryPageChildren({
+          snapshot,
+          canonicalRoot: project.canonicalRoot,
+          projectRevision: project.revision,
+          parentDirectory: '',
+          depth: 1,
+          expanded,
+          selected
+        });
       }
       return {
         kind: 'project',
@@ -261,7 +252,7 @@ export class PhotoshopPanelView {
           if (current.item.expandable && !current.item.expanded) {
             action = () => this.runtime.expandDestination(canonicalRoot, directory);
           } else {
-            const firstChild = current.item.children.find((child) => child.kind !== 'loading');
+            const firstChild = current.item.children.find((child) => child.kind !== 'state');
             if (firstChild) {
               action = () => this.runtime.selectDestination(firstChild.canonicalRoot, firstChild.directory);
             }
@@ -314,25 +305,6 @@ function destinationLabel(snapshot: PhotoshopPluginSnapshot): string {
     : `${destination.projectName} / ${destination.directory}`;
 }
 
-function directChildren(
-  directories: readonly string[],
-  currentDirectory: string
-): Array<{ directory: string; label: string }> {
-  const prefix = currentDirectory === '' ? '' : `${currentDirectory}/`;
-  const children = new Map<string, string>();
-  for (const directory of directories) {
-    if (directory === '' || directory === currentDirectory || !directory.startsWith(prefix)) continue;
-    const remainder = directory.slice(prefix.length);
-    const label = remainder.split('/')[0];
-    if (!label) continue;
-    const child = prefix + label;
-    children.set(child, label);
-  }
-  return [...children]
-    .map(([directory, label]) => ({ directory, label }))
-    .sort((left, right) => naturalCompare(left.label, right.label));
-}
-
 function naturalCompare(left: string, right: string): number {
   const primary = left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
   return primary === 0
@@ -340,37 +312,83 @@ function naturalCompare(left: string, right: string): number {
     : primary;
 }
 
-function directoryTreeChildren(input: {
+function directoryPageChildren(input: {
+  snapshot: PhotoshopPluginSnapshot;
   canonicalRoot: string;
-  directories: readonly string[];
+  projectRevision: number;
   parentDirectory: string;
   depth: number;
   expanded: ReadonlySet<string>;
   selected: string | null;
-}): DestinationTreeItemPresentation[] {
-  return directChildren(input.directories, input.parentDirectory).map((child) => {
-    const key = treeIdentity(input.canonicalRoot, child.directory);
-    const children = directChildren(input.directories, child.directory);
-    const isExpanded = input.expanded.has(key);
-    return {
-      kind: 'directory',
-      key,
-      canonicalRoot: input.canonicalRoot,
-      directory: child.directory,
-      label: child.label,
-      depth: input.depth,
-      expanded: isExpanded,
-      expandable: children.length > 0,
-      selected: input.selected === key,
-      children: isExpanded
-        ? directoryTreeChildren({
-            ...input,
-            parentDirectory: child.directory,
-            depth: input.depth + 1
-          })
-        : []
-    };
-  });
+}): DestinationTreeNodePresentation[] {
+  const page = input.snapshot.directoryPages.find((candidate) => (
+    candidate.canonicalRoot === input.canonicalRoot
+    && candidate.directory === input.parentDirectory
+    && candidate.projectRevision === input.projectRevision
+  ));
+  if (!page || page.status === 'loading') {
+    return [directoryState(input, 'loading', 'Loading directories…')];
+  }
+  if (page.status === 'missing') {
+    return [directoryState(input, 'missing', 'Directory is no longer available.')];
+  }
+  if (page.status === 'error') {
+    const detail = page.message?.trim();
+    return [directoryState(
+      input,
+      'error',
+      detail ? `Could not load directories: ${detail}` : 'Could not load directories.'
+    )];
+  }
+  return [...page.childDirectories]
+    .map((directory) => ({ directory, label: directoryLabel(directory) }))
+    .sort((left, right) => naturalCompare(left.label, right.label))
+    .map((child): DestinationTreeItemPresentation => {
+      const key = treeIdentity(input.canonicalRoot, child.directory);
+      const childPage = input.snapshot.directoryPages.find((candidate) => (
+        candidate.canonicalRoot === input.canonicalRoot
+        && candidate.directory === child.directory
+        && candidate.projectRevision === input.projectRevision
+      ));
+      const expandable = childPage?.status !== 'loaded' || childPage.childDirectories.length > 0;
+      const isExpanded = expandable && input.expanded.has(key);
+      return {
+        kind: 'directory',
+        key,
+        canonicalRoot: input.canonicalRoot,
+        directory: child.directory,
+        label: child.label,
+        depth: input.depth,
+        expanded: isExpanded,
+        expandable,
+        selected: input.selected === key,
+        children: isExpanded
+          ? directoryPageChildren({
+              ...input,
+              parentDirectory: child.directory,
+              depth: input.depth + 1
+            })
+          : []
+      };
+    });
+}
+
+function directoryState(
+  input: { canonicalRoot: string; parentDirectory: string; depth: number },
+  state: DestinationTreeStatePresentation['state'],
+  label: string
+): DestinationTreeStatePresentation {
+  return {
+    kind: 'state',
+    state,
+    key: `${treeIdentity(input.canonicalRoot, input.parentDirectory)}:${state}`,
+    label,
+    depth: input.depth
+  };
+}
+
+function directoryLabel(directory: string): string {
+  return directory.slice(directory.lastIndexOf('/') + 1);
 }
 
 function treeIdentity(canonicalRoot: string, directory: string): string {
@@ -385,8 +403,8 @@ function renderDestinationTreeNode(node: DestinationTreeItemPresentation): strin
   const children = node.children.length === 0
     ? ''
     : `<div class="photoshop-panel__tree-group" id="${escapeHtml(groupId ?? '')}" role="group">
-        ${node.children.map((child) => child.kind === 'loading'
-          ? `<p class="photoshop-panel__tree-loading" role="status" style="--tree-indent: ${child.depth * TREE_INDENT_PX}px">
+        ${node.children.map((child) => child.kind === 'state'
+          ? `<p class="photoshop-panel__tree-state photoshop-panel__tree-state--${child.state}" role="status" style="--tree-indent: ${child.depth * TREE_INDENT_PX}px">
               ${treeGuideLines(child.depth)}${escapeHtml(child.label)}
             </p>`
           : renderDestinationTreeNode(child)).join('')}
@@ -434,7 +452,7 @@ function flattenDestinationTree(
   ): void => {
     visible.push({ item, parent });
     for (const child of item.children) {
-      if (child.kind !== 'loading') append(child, item);
+      if (child.kind !== 'state') append(child, item);
     }
   };
   for (const root of roots) append(root, null);

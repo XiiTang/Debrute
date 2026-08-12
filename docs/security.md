@@ -39,8 +39,13 @@ Photoshop WebSockets require the exact `file://` origin emitted by UXP together
 with a loopback peer, exact gateway Host, fixed route, and subprotocol. UXP HTTP
 requests are accepted only when Origin is absent, as observed in Photoshop
 27.8, or exactly `file://`; file bytes additionally require the ephemeral socket
-bearer. Photoshop routes do not inherit Workbench or CLI authority. See
-[`photoshop.md`](./photoshop.md).
+bearer. The route group is closed before business dispatch: the session route
+accepts only an exact WebSocket-upgrade GET, the two byte routes accept only
+their exact GET or PNG POST plus their own OPTIONS preflight, HEAD and reverse
+methods return 405, and unknown paths return 404. Every HTTP failure has the
+same closed Photoshop v1 JSON envelope; byte-route perimeter or authorization
+failure is the path-free `photoshop_session_invalid` 403 response. Photoshop
+routes do not inherit Workbench or CLI authority. See [`photoshop.md`](./photoshop.md).
 
 The Runtime-owned Photoshop Integration setting controls whether that complete
 authority surface exists. Off binds no fixed-pool listener and retains no
@@ -184,6 +189,14 @@ protocol. Canonical Root is deliberately present as the understandable Project
 identity in both Workbench URLs and Photoshop destinations. The first version
 performs no user authorization ceremony; protection against another local
 process imitating the plugin remains deferred.
+
+The plugin captures each admitted transfer through an immutable revocable
+session lease containing the exact socket, loopback origin, and bearer. A new
+socket creates a new lease and cannot inherit an old command. Revocation blocks
+new control and byte dispatch immediately, while Runtime pins an HTTP upload
+already inside its Project commit until that commit settles. A dispatched POST
+without a trustworthy response is never retried or replayed because the plugin
+cannot prove whether the Project mutation committed.
 
 ## Executable Authorities
 

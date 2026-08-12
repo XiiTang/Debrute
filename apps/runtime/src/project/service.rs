@@ -485,7 +485,10 @@ impl ProjectService {
         Ok(self.snapshot.clone())
     }
 
-    fn load_project_directories(&mut self, directories: &[String]) -> Result<(), ProjectError> {
+    pub(crate) fn load_project_directories(
+        &mut self,
+        directories: &[String],
+    ) -> Result<(), ProjectError> {
         let checkpoint = self.snapshot_load_checkpoint();
         let result = (|| {
             let change = self.project_tree.load_directories(directories)?;

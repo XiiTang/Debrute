@@ -84,9 +84,12 @@ later pool entries. The next round starts only after the failed round has ended
 and another five seconds has elapsed. Each accepted socket receives a new
 memory-only plugin session identity and HTTP bearer. Closing the socket revokes
 both, removes its Photoshop Documents from every Workbench, cancels that
-session's in-flight HTTP work before any later Photoshop host effect, and fails
-its active command. There is no pairing, persistent plugin identity, Project
-link, offline queue, retry of transfers, replay, or transfer history.
+session's not-yet-dispatched HTTP work before any later Photoshop host effect,
+and retires every command which is not already inside a Runtime Project commit.
+An upload already inside that commit drains to a terminal result while the
+revoked bearer admits no further work. There is no pairing, persistent plugin
+identity, Project link, offline queue, retry of transfers, replay, or transfer
+history.
 
 Each session start declares the exact native formats that its current
 Photoshop host can place as Embedded Smart Objects. The closed list is PNG,
@@ -98,25 +101,32 @@ to every Workbench.
 
 The socket carries only bounded JSON control. Command bytes use two fixed HTTP
 routes on the same gateway and the socket's bearer in the `Authorization`
-header. UXP WebSocket connections serialize the plugin origin as `file://`, so
+header. `/photoshop/session` accepts only a valid WebSocket-upgrade `GET`; it
+has no CORS preflight. The command-content route accepts `GET` and `OPTIONS`,
+and the export-item route accepts `POST image/png` and `OPTIONS`. `HEAD`, reverse
+methods, and every other listed-path method return 405; an unknown path returns
+404. UXP WebSocket connections serialize the plugin origin as `file://`, so
 the gateway requires that exact Origin together with a loopback peer, exact
 numeric Host, fixed socket path, and subprotocol. Photoshop 27.8 UXP `fetch`
 omits Origin; HTTP therefore accepts only an absent Origin or exact `file://`,
 then requires the same loopback peer and Host, a fixed route, and a live bearer.
 HTTP failures use the Photoshop v1 protocol's exact error envelope and closed
 error-code set. The plugin rejects unknown codes, fields outside that envelope,
-and blank messages rather than treating them as Runtime errors.
+and blank messages rather than treating them as Runtime errors. Byte-route
+peer, Host, Origin, and authorization rejection use a path-free
+`photoshop_session_invalid` 403 envelope.
 
 ## Debrute To Photoshop
 
 For one visible Project PNG, JPEG, WebP, PSD, or AVIF file at or below 256 MiB,
 the Workbench context menu shows **Send to Photoshop** only when at least one
-live session reports an open Photoshop Document. Off, waiting, unavailable, an
-unhydrated projection, and connected sessions with no open Documents hide the
-entire submenu. A Canvas context menu uses the clicked projected node's own
-availability facts, including its size; it does not depend on the Explorer's
-shallow directory listing. Once visible, the submenu lists every open Photoshop
-Document reported by every live plugin session.
+live session reports an open Photoshop Document. Explorer takes file kind and
+size from the clicked Project Tree entry and never depends on Canvas. Canvas
+takes availability and size from the clicked projected node and never depends
+on Explorer. Both feed the same Photoshop eligibility rule. Off, waiting,
+unavailable, missing surface-owned facts, and connected sessions with no open
+Documents hide the entire submenu. Once visible, the submenu lists every open
+Photoshop Document reported by every live plugin session.
 Titles are presentation only, so duplicate titles remain separate command
 targets. A Document row remains visible but is disabled when that session did
 not declare the source format. An AVIF row gives the requirement
@@ -131,7 +141,9 @@ captured bytes into the bound Document as an **Embedded Smart Object**
 (`linked: false`) and verifies the result. Focus changes cannot retarget it; if
 the bound Document closes, the command fails. The plugin never creates another
 Document or falls back to a normal pixel layer, linked Smart Object, or other
-representation.
+representation. The plugin deletes its placement temporary file before it
+reports the command result. A cleanup failure is logged locally without
+pretending that an already verified Embedded Smart Object was not created.
 
 One command always contains one source file and creates one Embedded Smart
 Object. Sending several files requires several explicit commands. Debrute does
@@ -172,28 +184,41 @@ no separate triangle column.
 
 Runtime initially publishes only live canonical roots, names, and revisions,
 so every Project root starts collapsed without an eager directory scan. The
-first expansion of one Project requests only that Project's complete current
-writable-directory snapshot. While it loads, the Project root is already the
+first expansion requests only the direct directory children of that root;
+expanding a child requests only that child's direct directory children. Runtime
+routes each request through the existing Project Session and revision-ordered
+Project Tree load command. It does not create a second recursive catalog,
+watcher, poller, or Project revision. While a page loads, the parent remains a
 selected valid destination and one muted non-interactive **Loading
-directories…** child appears; a valid export to that root does not wait for its
-children. An unchanged Project reuses its process-memory snapshot. A revision
-change invalidates and, when still expanded or needed to revalidate selection,
-reloads only that Project. An empty Project has no invented child row. The
-snapshot contains ordinary writable directories even when `.gitignore`
-excludes them; Git ignore rules do not define Photoshop transfer targets.
-Fixed dependency/build exclusions, symbolic links, `.git`, and the complete
-protected `.debrute` namespace remain unavailable.
+directories…** child appears; a valid export to that parent does not wait for
+its children. An unchanged loaded parent reuses the shared Project Tree state.
+Each page result names its base revision and resulting revision so the plugin
+can distinguish its own load from an unrelated stale change. The plugin accepts
+only one page per requested parent and unique direct-child paths belonging to
+that parent; invalid nesting, duplicates, and `.debrute` segments close the
+session instead of entering the cache.
+
+The directory projection reuses Project Tree visibility. Ordinary dependency,
+build, and `.gitignore`-excluded directories are available. Symbolic links,
+junctions, `.git`, managed temporary entries, operating-system debris, and
+other paths excluded by the Project Tree remain unavailable. Photoshop adds
+one destination-only exclusion: any path containing a case-insensitive
+`.debrute` segment is unavailable. Directory listing and export admission use
+that same rule. An empty parent has no invented child row.
 
 The loaded plugin Runtime owns the single selected destination, the expanded
-node set, pending requests, and same-revision directory caches in memory.
+node set, pending requests, and exact-revision parent-page caches in memory.
 Closing and reopening the panel restores the expanded tree and reveals the
 selected row. A transient disconnect preserves expansion intent and the
 destination candidate but invalidates directory caches; reconnection reloads
 only the required live Projects before a directory selection becomes valid
-again. A live snapshot that removes a Project or directory clears that exact
-selection and prunes its unavailable expansion entries without selecting a
-parent or sibling. Photoshop or plugin restart resets selection, expansion,
-cache, and scroll state because none is stored on disk.
+again. A live snapshot that removes a Project or a loaded parent page that
+omits a formerly present directory clears that exact selection and prunes its
+unavailable branch without selecting a parent or sibling. Because every visible
+directory came from a loaded Project Tree parent, the existing watcher interest
+detects deletion without a Photoshop-specific watcher. Photoshop or plugin
+restart resets selection, expansion, cache, and scroll state because none is
+stored on disk.
 
 The selected full path remains in one fixed, ellipsized summary above the tree.
 The tree supports Up/Down selection across visible rows, Right to expand or
@@ -240,27 +265,42 @@ as an open transfer target. The source Document and its visibility tree remain
 unchanged.
 
 The complete batch is captured into immutable plugin-owned temporary files
-before the first upload. Uploads are serial and settle independently, so an
-earlier success remains after a later failure. Limits are 50 items, 256 MiB per
-PNG, and 1 GiB of captured PNG data per batch. Runtime never overwrites an
-existing Project file; collisions become `name.png`, `name 2.png`, and so on.
+before the first upload. One immutable Runtime session lease owns the admitted
+command from `export.start` through capture, every upload, and `export.finish`;
+reconnection cannot rebind it. Uploads are serial and settle independently, so
+an earlier success remains after a later explicit failure and a later item is
+still attempted. Limits are 50 items, 256 MiB per PNG, and 1 GiB of captured
+PNG data per batch. Runtime never overwrites an existing Project file;
+collisions become `name.png`, `name 2.png`, and so on.
+`photoshop.export.finish` is only a closed settlement receipt: a committed item
+is `{ itemId, ok: true, fileName }`, while an explicit failure is exactly
+`{ itemId, ok: false }`. It does not repeat HTTP error codes or messages.
 The first candidate comes from the selected layer or group name after Runtime
 replaces control and filesystem-invalid characters, trims surrounding
 whitespace and trailing dots, and bounds the stem to 120 characters. An empty
 safe name becomes `Photoshop File.png`.
-Runtime reads each plugin-owned temporary PNG into a Project-owned staging file
-and syncs that file before the no-replace commit; the UXP temporary path itself
-is never installed as a Project file. Temporary files are deleted after their
-terminal result. Project, staging, I/O, and Photoshop host diagnostics remain in
-the local Runtime log. Photoshop and Workbench receive only the closed error
-code and its reviewed path-free user message; temporary paths, Project roots,
-and other absolute host paths never enter the transfer error response.
+Runtime reads each plugin-owned temporary PNG into a uniquely created,
+RAII-owned Project staging file and syncs it before the no-replace commit; the
+UXP temporary path itself is never installed as a Project file. Partial write,
+sync, Project mutation, and collision failure all release staging. After all
+item outcomes are known, the plugin deletes every captured UXP temporary file
+as one cleanup phase and keeps the transfer busy until cleanup settles. Cleanup
+failure is appended as a warning to the same latest result and does not reverse
+an item settlement. Project, staging, I/O, cleanup, and Photoshop host
+diagnostics remain in the local log. Photoshop and Workbench receive only the
+closed error code and its reviewed path-free user message; temporary paths,
+Project roots, and other absolute host paths never enter the transfer error
+response.
 
 The final panel result names the destination captured by the admitted command
-and summarizes independent item settlement. A failed item does not roll back an
-earlier success or stop a later item from being attempted. The result is
-transient and is replaced by the next command; it is not copied into Workbench,
-system notifications, or persistent history.
+and summarizes `committed`, explicit `failed`, `not attempted`, and at most one
+`unknown` item. A complete valid 2xx upload response is permanently committed.
+If a POST was dispatched but no trustworthy response is available, that item
+is unknown: the plugin stops the batch, marks all later items not attempted,
+sends no finish, and performs no retry, status query, rollback, or replay. A
+failed item does not roll back an earlier success or stop a later item from
+being attempted. The result is transient and is replaced by the next command;
+it is not copied into Workbench, system notifications, or persistent history.
 
 ## State Ownership And Lifetime
 
@@ -271,7 +311,7 @@ system notifications, or persistent history.
 | Plugin session identity and bearer | Runtime | One accepted WebSocket; revoked immediately when it closes |
 | Photoshop Document catalog and placement formats | UXP host snapshot projected by Runtime | Replaced atomically by live session snapshots; removed with the session |
 | Live Project identities and revisions | Runtime | Current canonical-root projection only |
-| Directory snapshots | UXP plugin runtime | Cached by exact Canonical Root and revision; invalidated on disconnect or revision change |
+| Directory pages | Shared Runtime Project Tree projected into UXP memory | Loaded by exact parent through the Project Session; UXP pages are cached by Canonical Root, parent, and revision and invalidated on disconnect or unrelated revision change |
 | Expanded tree nodes and selected destination candidate | UXP plugin runtime | Survive panel detach and transient reconnect; reset on plugin or Photoshop restart |
 | Admitted source, target, staging, and progress | Command coordinator | One command; immutable after admission and deleted after terminal settlement |
 | User-visible result | Initiating surface | Latest transient result only |
@@ -306,8 +346,9 @@ The architectural rationale is recorded in ADRs
 [0062](./adr/0062-photoshop-receiver-lifetime-follows-photoshop.md),
 [0063](./adr/0063-photoshop-transfers-use-explicit-live-targets.md),
 [0064](./adr/0064-photoshop-connections-use-ephemeral-runtime-sessions.md),
-[0065](./adr/0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md), and
-[0068](./adr/0068-professional-application-integration-enablement-is-runtime-owned.md).
+[0065](./adr/0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md),
+[0068](./adr/0068-professional-application-integration-enablement-is-runtime-owned.md),
+and [0080](./adr/0080-photoshop-directory-browsing-reuses-the-project-tree.md).
 
 ## Explicit Non-Goals
 
@@ -333,13 +374,17 @@ The architectural rationale is recorded in ADRs
 
 Automated verification must cover default-off persistence, closed Integration
 settings, conditional gateway lifetime, unavailable retry, transfer-safe
-disable, strict protocol parsing, port-pool behavior, session and bearer
-revocation, exact target binding, immutable staging, live-Document-gated
-Workbench menus, isolated full-canvas PNG rendering, independent item
-settlement, directory filtering, tree state, keyboard interaction, the
-Connected/Waiting panel projection, fixed-region layout, and both-axis tree
-overflow. The repository gate is `pnpm verify`, followed by `git diff --check` and
-`pnpm package:photoshop-uxp-plugin` for a package candidate.
+disable, strict protocol parsing, the production-listener route/method/Host/
+Origin/authorization matrix, port-pool behavior, session and bearer revocation,
+old-lease non-rebinding, exact target binding, immutable staging, partial-write
+cleanup, in-commit disconnect drain, known and unknown upload outcomes,
+whole-batch UXP cleanup, live-Document-gated Workbench menus, Explorer/Canvas
+fact independence, isolated full-canvas PNG rendering, independent item
+settlement, shallow shared-Project-Tree directory filtering and invalidation,
+tree state, keyboard interaction, the Connected/Waiting panel projection,
+fixed-region layout, and both-axis tree overflow. The release acceptance gate
+is `pnpm verify:all`, followed by `git diff --check`, the native watcher gate,
+and `pnpm package:photoshop-uxp-plugin` for a package candidate.
 
 Automated tests do not substitute for real Photoshop acceptance. macOS and
 Windows package candidates must be loaded through UXP Developer Tool or as the

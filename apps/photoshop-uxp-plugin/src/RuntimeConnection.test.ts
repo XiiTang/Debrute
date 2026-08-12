@@ -257,7 +257,7 @@ describe('RuntimeConnection', () => {
       bearer: 'bearer-1'
     });
 
-    const download = connection.downloadCommandContent('command-1', 3);
+    const download = connection.requireSession().downloadCommandContent('command-1', 3);
     await Promise.resolve();
     await Promise.resolve();
     const byteDeadline = scheduled.find((entry) => entry.delay === 5 * 60_000);
@@ -297,7 +297,7 @@ describe('RuntimeConnection', () => {
       bearer: 'bearer-1'
     });
 
-    const download = connection.downloadCommandContent('command-1', 3);
+    const download = connection.requireSession().downloadCommandContent('command-1', 3);
     await Promise.resolve();
     socket.closeFromPeer();
     expect(requestSignal?.aborted).toBe(true);
@@ -332,7 +332,8 @@ describe('RuntimeConnection', () => {
       bearer: 'bearer-1'
     });
 
-    await expect(connection.uploadExportItem(
+    const session = connection.requireSession();
+    await expect(session.uploadExportItem(
       'command-1',
       'item-1',
       new Uint8Array([0, 1, 2, 3]).subarray(1, 3)
@@ -342,6 +343,119 @@ describe('RuntimeConnection', () => {
     expect(init?.body).toBeInstanceOf(ArrayBuffer);
     expect([...new Uint8Array(init?.body as ArrayBuffer)]).toEqual([1, 2]);
     expect(new Headers(init?.headers).get('Content-Type')).toBe('image/png');
+    expect(request.mock.calls[0]?.[0]).toBe(
+      'http://127.0.0.1:32124/photoshop/exports/command-1/items/item-1'
+    );
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer bearer-1');
+  });
+
+  it('never rebinds an admitted operation to a replacement socket session', async () => {
+    const first = new FakeSocket(
+      'ws://127.0.0.1:32124/photoshop/session',
+      PHOTOSHOP_WEBSOCKET_SUBPROTOCOL
+    );
+    const second = new FakeSocket(
+      'ws://127.0.0.1:32124/photoshop/session',
+      PHOTOSHOP_WEBSOCKET_SUBPROTOCOL
+    );
+    const sockets = [first, second];
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    const scheduled: Array<{ callback: () => void; delay: number }> = [];
+    const connection = new RuntimeConnection({
+      hostVersion: () => '27.9.0',
+      placementMimeTypes: () => [...placementMimeTypes()],
+      documents: () => [],
+      createSocket: () => sockets.shift() ?? second,
+      request: async (url, init) => {
+        requests.push({
+          url,
+          authorization: new Headers(init?.headers).get('Authorization')
+        });
+        return new Response(JSON.stringify({ fileName: 'Hero.png' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      },
+      schedule: (callback, delay) => {
+        scheduled.push({ callback, delay });
+        return scheduled.length;
+      },
+      cancelSchedule: vi.fn(),
+      onState: vi.fn(),
+      onMessage: vi.fn()
+    });
+    connection.start();
+    first.open();
+    scheduled.find((entry) => entry.delay === 0)?.callback();
+    first.message({
+      type: 'photoshop.session.ready',
+      runtimeInstanceId: 'runtime-1',
+      pluginSessionId: 'session-1',
+      bearer: 'bearer-1'
+    });
+    const admitted = connection.requireSession();
+
+    first.closeFromPeer();
+    scheduled.at(-1)?.callback();
+    second.open();
+    scheduled.filter((entry) => entry.delay === 0).at(-1)?.callback();
+    second.message({
+      type: 'photoshop.session.ready',
+      runtimeInstanceId: 'runtime-1',
+      pluginSessionId: 'session-2',
+      bearer: 'bearer-2'
+    });
+
+    expect(admitted.isLive()).toBe(false);
+    expect(() => admitted.send({
+      type: 'photoshop.documents.snapshot',
+      documents: []
+    })).toThrow('Photoshop Runtime session was lost.');
+    await expect(admitted.uploadExportItem(
+      'command-1',
+      'item-1',
+      new Uint8Array([1])
+    )).rejects.toThrow('Photoshop Runtime session was lost.');
+    expect(requests).toEqual([]);
+    expect(second.sent.map((value) => JSON.parse(value))).not.toContainEqual(expect.objectContaining({
+      commandId: 'command-1'
+    }));
+  });
+
+  it('revokes an admitted session when its socket rejects a control send', () => {
+    const { connection, socket } = readyConnection(async () => new Response(null, { status: 204 }));
+    const session = connection.requireSession();
+    vi.spyOn(socket, 'send').mockImplementationOnce(() => {
+      throw new Error('socket is no longer writable');
+    });
+
+    expect(() => session.send({
+      type: 'photoshop.documents.snapshot',
+      documents: []
+    })).toThrow('Photoshop Runtime session was lost.');
+
+    expect(session.isLive()).toBe(false);
+    expect(socket.closed).toBe(true);
+    expect(() => connection.requireSession()).toThrow('Photoshop Runtime session is not ready.');
+  });
+
+  it('keeps a validated upload acknowledgement committed when the socket closes afterward', async () => {
+    let closeAfterResponse!: () => void;
+    const { connection, socket } = readyConnection(async () => {
+      const response = new Response(JSON.stringify({ fileName: 'Hero.png' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+      closeAfterResponse = () => socket.closeFromPeer();
+      return response;
+    });
+    const session = connection.requireSession();
+    const upload = session.uploadExportItem('command-1', 'item-1', new Uint8Array([1]));
+    await Promise.resolve();
+    closeAfterResponse();
+
+    await expect(upload).resolves.toEqual({ fileName: 'Hero.png' });
+    expect(session.isLive()).toBe(false);
   });
 
   it('surfaces the closed Runtime error code and message for failed transfers', async () => {
@@ -355,7 +469,7 @@ describe('RuntimeConnection', () => {
       headers: { 'Content-Type': 'application/json' }
     }));
 
-    await expect(connection.uploadExportItem(
+    await expect(connection.requireSession().uploadExportItem(
       'command-1',
       'item-1',
       new Uint8Array([1])
@@ -364,20 +478,51 @@ describe('RuntimeConnection', () => {
     );
   });
 
-  it('rejects a non-JSON Runtime error response explicitly', async () => {
+  it('keeps a complete closed rejection explicit when the socket closes afterward', async () => {
+    let closeAfterResponse!: () => void;
+    const { connection, socket } = readyConnection(async () => {
+      const response = new Response(JSON.stringify({
+        error: {
+          code: 'photoshop_export_failed',
+          message: 'Project staging sync failed.'
+        }
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+      closeAfterResponse = () => socket.closeFromPeer();
+      return response;
+    });
+
+    const upload = connection.requireSession().uploadExportItem(
+      'command-1',
+      'item-1',
+      new Uint8Array([1])
+    );
+    await Promise.resolve();
+    closeAfterResponse();
+
+    await expect(upload).rejects.toThrow(
+      'Photoshop transfer failed with HTTP 400 (photoshop_export_failed): Project staging sync failed.'
+    );
+  });
+
+  it('treats a non-JSON upload response as an unknown commit outcome', async () => {
     const { connection } = readyConnection(async () => new Response('gateway unavailable', {
       status: 502,
       headers: { 'Content-Type': 'text/plain' }
     }));
 
-    await expect(connection.uploadExportItem(
+    await expect(connection.requireSession().uploadExportItem(
       'command-1',
       'item-1',
       new Uint8Array([1])
-    )).rejects.toThrow('Photoshop Runtime returned invalid JSON for HTTP 502.');
+    )).rejects.toThrow(
+      'Photoshop export item may have been saved, but Runtime confirmation was lost.'
+    );
   });
 
-  it('rejects a Runtime error response outside the closed envelope', async () => {
+  it('treats an upload response outside the closed envelope as an unknown commit outcome', async () => {
     const { connection } = readyConnection(async () => new Response(JSON.stringify({
       message: 'Project revision changed.'
     }), {
@@ -385,14 +530,16 @@ describe('RuntimeConnection', () => {
       headers: { 'Content-Type': 'application/json' }
     }));
 
-    await expect(connection.uploadExportItem(
+    await expect(connection.requireSession().uploadExportItem(
       'command-1',
       'item-1',
       new Uint8Array([1])
-    )).rejects.toThrow('Photoshop Runtime returned an invalid error response for HTTP 409.');
+    )).rejects.toThrow(
+      'Photoshop export item may have been saved, but Runtime confirmation was lost.'
+    );
   });
 
-  it('rejects an unknown Runtime error code inside an otherwise valid envelope', async () => {
+  it('treats an unknown upload error code as an unknown commit outcome', async () => {
     const { connection } = readyConnection(async () => new Response(JSON.stringify({
       error: {
         code: 'unknown_runtime_error',
@@ -403,11 +550,13 @@ describe('RuntimeConnection', () => {
       headers: { 'Content-Type': 'application/json' }
     }));
 
-    await expect(connection.uploadExportItem(
+    await expect(connection.requireSession().uploadExportItem(
       'command-1',
       'item-1',
       new Uint8Array([1])
-    )).rejects.toThrow('Photoshop Runtime returned an invalid error response for HTTP 400.');
+    )).rejects.toThrow(
+      'Photoshop export item may have been saved, but Runtime confirmation was lost.'
+    );
   });
 });
 

@@ -1,5 +1,6 @@
 import type {
   ProjectPathRef,
+  ProjectTreeEntry,
   PhotoshopStateView,
   WorkbenchApiClient
 } from '@debrute/app-protocol';
@@ -37,6 +38,7 @@ export function createProjectPathCommandRouter(input: {
     | 'copyProjectPathsToSystemClipboard'
     | 'sendProjectFileToPhotoshop'
   >;
+  projectTree: readonly ProjectTreeEntry[];
   projection: CanvasProjection | undefined;
   explorer: ProjectExplorerController;
   photoshop: PhotoshopStateView | undefined;
@@ -54,6 +56,7 @@ export function createProjectPathCommandRouter(input: {
     contextMenuItems(target) {
       const items = buildWorkbenchContextMenuItems({
         target,
+        projectTree: input.projectTree,
         projection: input.projection,
         fileClipboard: input.explorer.fileClipboard,
         photoshop: input.photoshop

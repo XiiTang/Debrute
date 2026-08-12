@@ -11,10 +11,13 @@ carry file bytes using the same session bearer. There is no separate HTTP
 discovery request, WebSocket file-chunk protocol, second HTTP identity,
 generated signed-URL subsystem, or redirection into the Workbench server.
 
-The gateway file surface is closed to one command-content GET and one
-command-item PNG POST. Both use the socket session's bearer in the
-`Authorization` header, and neither selects a destination independently of its
-already admitted Photoshop command.
+The gateway surface is closed to one WebSocket-upgrade GET, one command-content
+GET, one command-item PNG POST, and CORS OPTIONS only for the two byte routes.
+HEAD and every reverse or unlisted method return 405; unknown paths return 404.
+Both byte routes use the socket session's bearer in the `Authorization` header,
+and neither selects a destination independently of its already admitted
+Photoshop command. Every HTTP failure uses the same closed Photoshop v1 JSON
+error envelope, including perimeter and authorization rejection.
 
 The Runtime-owned Photoshop enable setting controls the complete gateway
 lifecycle. Off binds no pool port and retains no Photoshop route or session

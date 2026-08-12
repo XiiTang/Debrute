@@ -61,6 +61,98 @@ describe('Photoshop v1 Runtime message parser', () => {
     });
   });
 
+  it('accepts only the exact shallow Project directory batch result', () => {
+    const loaded = {
+      type: 'photoshop.projectDirectories.result',
+      requestId: 'directories-1',
+      canonicalRoot: '/projects/project-1',
+      baseProjectRevision: 4,
+      projectRevision: 5,
+      outcome: 'loaded',
+      pages: [
+        { directory: '', outcome: 'loaded', childDirectories: ['exports', 'folder2'] },
+        { directory: 'exports', outcome: 'loaded', childDirectories: [] },
+        { directory: 'removed', outcome: 'missing' },
+        { directory: 'unreadable', outcome: 'error', message: 'Access denied.' }
+      ]
+    };
+    const stale = {
+      type: 'photoshop.projectDirectories.result',
+      requestId: 'directories-2',
+      canonicalRoot: '/projects/project-1',
+      baseProjectRevision: 4,
+      projectRevision: 6,
+      outcome: 'stale'
+    };
+
+    expect(parseRuntimeMessage(JSON.stringify(loaded))).toEqual(loaded);
+    expect(parseRuntimeMessage(JSON.stringify(stale))).toEqual(stale);
+    expect(() => parseRuntimeMessage(JSON.stringify({
+      ...loaded,
+      pages: [{ directory: '', outcome: 'loaded', childDirectories: [], extra: true }]
+    }))).toThrow(/invalid/i);
+    for (const childDirectories of [
+      ['exports', 'exports'],
+      ['exports/deep'],
+      ['.debrute'],
+      ['exports/.DeBrute']
+    ]) {
+      expect(() => parseRuntimeMessage(JSON.stringify({
+        ...loaded,
+        pages: [{ directory: '', outcome: 'loaded', childDirectories }]
+      }))).toThrow(/invalid/i);
+    }
+    expect(() => parseRuntimeMessage(JSON.stringify({
+      ...loaded,
+      pages: [
+        { directory: '', outcome: 'missing' },
+        { directory: '', outcome: 'loaded', childDirectories: [] }
+      ]
+    }))).toThrow(/invalid/i);
+    expect(() => parseRuntimeMessage(JSON.stringify({
+      type: 'photoshop.projectDirectories.snapshot',
+      requestId: 'directories-1',
+      canonicalRoot: '/projects/project-1',
+      revision: 4,
+      directories: []
+    }))).toThrow(/invalid/i);
+  });
+
+  it('serializes one exact shallow Project directory batch request', () => {
+    expect(JSON.parse(serializePluginMessage({
+      type: 'photoshop.projectDirectories.request',
+      requestId: 'directories-1',
+      canonicalRoot: '/projects/project-1',
+      baseProjectRevision: 4,
+      directories: ['', 'exports']
+    }))).toEqual({
+      type: 'photoshop.projectDirectories.request',
+      requestId: 'directories-1',
+      canonicalRoot: '/projects/project-1',
+      baseProjectRevision: 4,
+      directories: ['', 'exports']
+    });
+  });
+
+  it('serializes export completion with the closed success-or-failure shape', () => {
+    expect(JSON.parse(serializePluginMessage({
+      type: 'photoshop.export.finish',
+      commandId: 'export-1',
+      items: [
+        { itemId: 'one', ok: true, fileName: 'Layer.png' },
+        { itemId: 'two', ok: false }
+      ]
+    }))).toEqual({
+      type: 'photoshop.export.finish',
+      commandId: 'export-1',
+      items: [
+        { itemId: 'one', ok: true, fileName: 'Layer.png' },
+        { itemId: 'two', ok: false }
+      ]
+    });
+
+  });
+
   it('rejects unknown messages, fields, MIME types, and invalid identities', () => {
     expect(() => parseRuntimeMessage('{"type":"bridge.ready"}')).toThrow(/invalid/i);
     expect(() => parseRuntimeMessage(JSON.stringify({

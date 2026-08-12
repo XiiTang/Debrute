@@ -814,28 +814,29 @@ mod tests {
 
     #[test]
     fn product_state_uses_exact_installed_layout_paths() {
+        let macos_home = PathBuf::from("/Users/alice");
+        let windows_home = PathBuf::from(r"C:\Users\Alice");
         let cases = [
             (
-                InstalledProductLayout::for_roots(
-                    CommitPlatform::Macos,
-                    PathBuf::from("/Users/alice"),
-                    None,
-                )
-                .unwrap(),
+                InstalledProductLayout::for_roots(CommitPlatform::Macos, macos_home.clone(), None)
+                    .unwrap(),
                 "darwin",
-                PathBuf::from("/Users/alice/.debrute/bin/debrute"),
-                PathBuf::from("/Users/alice/.agents/skills"),
+                macos_home.join(".debrute").join("bin").join("debrute"),
+                macos_home.join(".agents/skills"),
             ),
             (
                 InstalledProductLayout::for_roots(
                     CommitPlatform::Windows,
-                    PathBuf::from(r"C:\Users\Alice"),
+                    windows_home.clone(),
                     Some(PathBuf::from(r"C:\Users\Alice\AppData\Local")),
                 )
                 .unwrap(),
                 "win32",
-                PathBuf::from(r"C:\Users\Alice/.debrute/bin/debrute.cmd"),
-                PathBuf::from(r"C:\Users\Alice/.agents/skills"),
+                windows_home
+                    .join(".debrute")
+                    .join("bin")
+                    .join("debrute.cmd"),
+                windows_home.join(".agents/skills"),
             ),
         ];
 

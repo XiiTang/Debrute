@@ -8,10 +8,10 @@ use std::{
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
-    extract::{ConnectInfo, Path, Request, State},
+    extract::{ConnectInfo, Path, Request, State, rejection::PathRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{MethodFilter, MethodRouter},
 };
 use serde_json::json;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
@@ -126,14 +126,27 @@ fn bind_first_gateway_listener() -> Option<TcpListener> {
 
 fn gateway_router(state: GatewayState) -> Router {
     Router::new()
-        .route("/photoshop/session", get(session).options(preflight))
+        .route(
+            "/photoshop/session",
+            MethodRouter::new()
+                .on(MethodFilter::GET, session)
+                .on(MethodFilter::HEAD, method_not_allowed)
+                .fallback(method_not_allowed),
+        )
         .route(
             "/photoshop/commands/{command_id}/content",
-            get(command_content).options(preflight),
+            MethodRouter::new()
+                .on(MethodFilter::GET, command_content)
+                .on(MethodFilter::HEAD, method_not_allowed)
+                .on(MethodFilter::OPTIONS, command_content_preflight)
+                .fallback(method_not_allowed),
         )
         .route(
             "/photoshop/exports/{command_id}/items/{item_id}",
-            post(export_item).options(preflight),
+            MethodRouter::new()
+                .on(MethodFilter::POST, export_item)
+                .on(MethodFilter::OPTIONS, export_item_preflight)
+                .fallback(method_not_allowed),
         )
         .fallback(not_found)
         .with_state(state)
@@ -187,21 +200,24 @@ async fn session(
         eprintln!(
             "Debrute Photoshop WebSocket rejected: request was not exact loopback gateway traffic"
         );
-        return StatusCode::FORBIDDEN.into_response();
+        return websocket_handshake_invalid_response();
     }
     if !uxp_origin_valid(&headers) {
         eprintln!("Debrute Photoshop WebSocket rejected: unexpected UXP origin");
-        return StatusCode::FORBIDDEN.into_response();
+        return websocket_handshake_invalid_response();
     }
     if exact_header(&headers, header::SEC_WEBSOCKET_PROTOCOL)
         != Some(PHOTOSHOP_WEBSOCKET_SUBPROTOCOL)
     {
         eprintln!("Debrute Photoshop WebSocket rejected: required subprotocol was not requested");
-        return StatusCode::FORBIDDEN.into_response();
+        return websocket_handshake_invalid_response();
     }
     let upgrade = match WebSocketUpgrade::from_request(request) {
         Ok(upgrade) => upgrade,
-        Err(response) => return response,
+        Err(_) => {
+            eprintln!("Debrute Photoshop WebSocket rejected: upgrade request was invalid");
+            return websocket_handshake_invalid_response();
+        }
     };
     let integration = Arc::clone(&state.integration);
     let mut response = upgrade.on_upgrade(move |connection| {
@@ -304,11 +320,14 @@ async fn run_session(
 async fn command_content(
     State(state): State<GatewayState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Path(command_id): Path<String>,
+    path: Result<Path<String>, PathRejection>,
     headers: HeaderMap,
 ) -> Response {
+    let Ok(Path(command_id)) = path else {
+        return invalid_path_parameter_response();
+    };
     let Some(bearer) = authorize_http(&state, peer, &headers) else {
-        return StatusCode::FORBIDDEN.into_response();
+        return session_invalid_response();
     };
     match state.integration.content(&bearer, &command_id) {
         Ok(content) => cors(
@@ -320,6 +339,9 @@ async fn command_content(
                 .body(Body::from(content.bytes))
                 .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
         ),
+        Err(error) if error.code().as_str() == "invalid_transfer_payload" => {
+            session_invalid_response()
+        }
         Err(error) => error_response(&error),
     }
 }
@@ -327,12 +349,15 @@ async fn command_content(
 async fn export_item(
     State(state): State<GatewayState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    Path((command_id, item_id)): Path<(String, String)>,
+    path: Result<Path<(String, String)>, PathRejection>,
     headers: HeaderMap,
     request: Request,
 ) -> Response {
+    let Ok(Path((command_id, item_id))) = path else {
+        return invalid_path_parameter_response();
+    };
     let Some(bearer) = authorize_http(&state, peer, &headers) else {
-        return StatusCode::FORBIDDEN.into_response();
+        return session_invalid_response();
     };
     if exact_header(&headers, header::CONTENT_TYPE) != Some("image/png") {
         return error(
@@ -376,22 +401,49 @@ async fn export_item(
         .upload(&bearer, &command_id, &item_id, &body)
     {
         Ok(result) => cors(Json(result).into_response()),
+        Err(error) if error.code().as_str() == "invalid_transfer_payload" => {
+            session_invalid_response()
+        }
         Err(error) => error_response(&error),
     }
 }
 
-async fn preflight(
+async fn command_content_preflight(
     State(state): State<GatewayState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Response {
-    if !base_request_valid(&state, peer, &headers) || !uxp_http_origin_valid(&headers) {
-        return StatusCode::FORBIDDEN.into_response();
+    if !base_request_valid(&state, peer, &headers)
+        || !exact_preflight(&headers, "GET", &["Authorization"])
+    {
+        return session_invalid_response();
     }
     let mut response = cors(StatusCode::NO_CONTENT.into_response());
     response.headers_mut().insert(
         header::ACCESS_CONTROL_ALLOW_METHODS,
-        HeaderValue::from_static("GET, POST, OPTIONS"),
+        HeaderValue::from_static("GET"),
+    );
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("Authorization"),
+    );
+    response
+}
+
+async fn export_item_preflight(
+    State(state): State<GatewayState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
+    if !base_request_valid(&state, peer, &headers)
+        || !exact_preflight(&headers, "POST", &["Authorization", "Content-Type"])
+    {
+        return session_invalid_response();
+    }
+    let mut response = cors(StatusCode::NO_CONTENT.into_response());
+    response.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("POST"),
     );
     response.headers_mut().insert(
         header::ACCESS_CONTROL_ALLOW_HEADERS,
@@ -401,7 +453,27 @@ async fn preflight(
 }
 
 async fn not_found() -> Response {
-    StatusCode::NOT_FOUND.into_response()
+    error(
+        StatusCode::NOT_FOUND,
+        "photoshop_protocol_invalid",
+        "Photoshop gateway route does not exist.",
+    )
+}
+
+async fn method_not_allowed() -> Response {
+    error(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "photoshop_protocol_invalid",
+        "Photoshop gateway method is not allowed.",
+    )
+}
+
+fn invalid_path_parameter_response() -> Response {
+    error(
+        StatusCode::BAD_REQUEST,
+        "photoshop_protocol_invalid",
+        "Photoshop gateway path parameter is invalid.",
+    )
 }
 
 fn authorize_http(state: &GatewayState, peer: SocketAddr, headers: &HeaderMap) -> Option<String> {
@@ -429,6 +501,34 @@ fn uxp_http_origin_valid(headers: &HeaderMap) -> bool {
         (Some(value), None) => value.to_str().ok() == Some(PHOTOSHOP_UXP_ORIGIN),
         _ => false,
     }
+}
+
+fn exact_preflight(headers: &HeaderMap, method: &str, allowed_headers: &[&str]) -> bool {
+    if !uxp_origin_valid(headers)
+        || exact_header(headers, header::ACCESS_CONTROL_REQUEST_METHOD) != Some(method)
+    {
+        return false;
+    }
+    let Some(requested_headers) = exact_header(headers, header::ACCESS_CONTROL_REQUEST_HEADERS)
+    else {
+        return false;
+    };
+    let requested_headers = requested_headers
+        .split(',')
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    requested_headers.len() == allowed_headers.len()
+        && requested_headers.iter().all(|requested| {
+            !requested.is_empty()
+                && allowed_headers
+                    .iter()
+                    .any(|allowed| requested.eq_ignore_ascii_case(allowed))
+        })
+        && allowed_headers.iter().all(|allowed| {
+            requested_headers
+                .iter()
+                .any(|requested| requested.eq_ignore_ascii_case(allowed))
+        })
 }
 
 fn exact_header(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
@@ -460,6 +560,22 @@ fn error_response(error_value: &PhotoshopError) -> Response {
     )
 }
 
+fn session_invalid_response() -> Response {
+    error(
+        StatusCode::FORBIDDEN,
+        "photoshop_session_invalid",
+        "Photoshop session is not live.",
+    )
+}
+
+fn websocket_handshake_invalid_response() -> Response {
+    error(
+        StatusCode::FORBIDDEN,
+        "photoshop_protocol_invalid",
+        "Photoshop WebSocket handshake is invalid.",
+    )
+}
+
 fn error(status: StatusCode, code: &'static str, message: &str) -> Response {
     cors(
         (
@@ -484,9 +600,835 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{net::TcpStream, thread, time::Duration};
+    use std::{
+        fs,
+        io::{BufReader, Read as _, Write as _},
+        net::{SocketAddr, TcpStream},
+        path::{Path, PathBuf},
+        sync::Arc,
+        thread,
+        time::Duration,
+    };
+
+    use axum::routing::get;
+    use reqwest::blocking::Client;
+    use serde_json::json;
+
+    use crate::{
+        control::RuntimeControlState,
+        project::{
+            CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, ProjectPreviewService,
+            ProjectSessionRegistry, ProjectUse, ProjectUseKind,
+        },
+    };
 
     use super::*;
+
+    struct TemporaryDirectory(PathBuf);
+
+    impl TemporaryDirectory {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "debrute-photoshop-gateway-{label}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl AsRef<Path> for TemporaryDirectory {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TemporaryDirectory {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap_or_else(|error| {
+                panic!(
+                    "failed to remove temporary Photoshop gateway directory {}: {error}",
+                    self.0.display()
+                )
+            });
+        }
+    }
+
+    struct TestGateway {
+        address: SocketAddr,
+        integration: Arc<PhotoshopIntegration>,
+        canonical_root: String,
+        project_revision: u64,
+        shutdown: Option<oneshot::Sender<()>>,
+        worker: Option<thread::JoinHandle<()>>,
+        _project_use: ProjectUse,
+        _project: TemporaryDirectory,
+        _home: TemporaryDirectory,
+    }
+
+    impl TestGateway {
+        fn start() -> Self {
+            let home = TemporaryDirectory::new("home");
+            let project = TemporaryDirectory::new("project");
+            fs::write(project.as_ref().join("source.png"), b"project source").unwrap();
+            let previews = Arc::new(ProjectPreviewService::new());
+            let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews).unwrap());
+            let projects = ProjectSessionRegistry::new(
+                home.as_ref(),
+                Arc::new(DefaultProjectNodeAdapter),
+                feedback,
+            );
+            let opened = projects
+                .open_project(project.as_ref(), ProjectUseKind::Workbench)
+                .unwrap();
+            let summary = opened.session.summary().unwrap();
+            let canonical_root = summary.canonical_root;
+            let project_revision = summary.project_revision;
+            let runtime_state = Arc::new(RuntimeControlState::new("runtime-1"));
+            assert!(runtime_state.finish_startup());
+            let integration = Arc::new(PhotoshopIntegration::new(
+                "runtime-1".to_owned(),
+                runtime_state,
+                projects,
+                Arc::new(|_| {}),
+            ));
+            integration.initialize_enabled(true);
+            integration.set_gateway_available(true);
+
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let address = listener.local_addr().unwrap();
+            let router = gateway_router(GatewayState {
+                integration: Arc::clone(&integration),
+                authority: address.to_string(),
+            });
+            let (startup_sender, startup_receiver) = mpsc::sync_channel(0);
+            let (shutdown, shutdown_receiver) = oneshot::channel();
+            let worker = thread::spawn(move || {
+                run_gateway(listener, router, startup_sender, shutdown_receiver);
+            });
+            assert_eq!(startup_receiver.recv().unwrap(), Ok(()));
+            Self {
+                address,
+                integration,
+                canonical_root,
+                project_revision,
+                shutdown: Some(shutdown),
+                worker: Some(worker),
+                _project_use: opened.project_use,
+                _project: project,
+                _home: home,
+            }
+        }
+
+        fn url(&self, path: &str) -> String {
+            format!("http://{}{path}", self.address)
+        }
+    }
+
+    impl Drop for TestGateway {
+        fn drop(&mut self) {
+            if let Some(shutdown) = self.shutdown.take() {
+                shutdown
+                    .send(())
+                    .expect("Photoshop gateway worker exited before test teardown");
+            }
+            if let Some(worker) = self.worker.take() {
+                worker.join().unwrap();
+            }
+            drop(TcpListener::bind(self.address).unwrap_or_else(|error| {
+                panic!(
+                    "Photoshop gateway test listener {} was not released: {error}",
+                    self.address
+                )
+            }));
+        }
+    }
+
+    fn client() -> Client {
+        Client::builder().no_proxy().build().unwrap()
+    }
+
+    struct TestWebSocket {
+        reader: BufReader<TcpStream>,
+        bearer: String,
+        session_id: String,
+    }
+
+    impl TestWebSocket {
+        fn connect(gateway: &TestGateway) -> Self {
+            let stream = TcpStream::connect(gateway.address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            stream
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut reader = BufReader::new(stream);
+            write!(
+                reader.get_mut(),
+                "GET /photoshop/session HTTP/1.1\r\nHost: {}\r\nOrigin: {}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: {}\r\n\r\n",
+                gateway.address,
+                PHOTOSHOP_UXP_ORIGIN,
+                PHOTOSHOP_WEBSOCKET_SUBPROTOCOL,
+            )
+            .unwrap();
+            reader.get_mut().flush().unwrap();
+            let headers = read_http_headers(&mut reader);
+            assert!(headers.starts_with("HTTP/1.1 101 "), "{headers}");
+            write_masked_text(
+                reader.get_mut(),
+                &json!({
+                    "type": "photoshop.session.start",
+                    "hostVersion": "27.8.0",
+                    "placementMimeTypes": ["image/png"],
+                    "documents": [{"documentId": 7, "title": "A.psd"}]
+                })
+                .to_string(),
+            );
+            let ready: serde_json::Value =
+                serde_json::from_str(&read_server_text(&mut reader)).unwrap();
+            assert_eq!(ready["type"], "photoshop.session.ready");
+            let projects: serde_json::Value =
+                serde_json::from_str(&read_server_text(&mut reader)).unwrap();
+            assert_eq!(projects["type"], "photoshop.projects.snapshot");
+            Self {
+                reader,
+                bearer: ready["bearer"].as_str().unwrap().to_owned(),
+                session_id: ready["pluginSessionId"].as_str().unwrap().to_owned(),
+            }
+        }
+    }
+
+    fn read_http_headers(reader: &mut BufReader<TcpStream>) -> String {
+        let mut bytes = Vec::new();
+        while !bytes.ends_with(b"\r\n\r\n") {
+            assert!(
+                bytes.len() < 16 * 1024,
+                "HTTP response headers exceeded test limit"
+            );
+            let mut byte = [0_u8; 1];
+            reader.read_exact(&mut byte).unwrap();
+            bytes.push(byte[0]);
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    fn write_masked_text(stream: &mut TcpStream, text: &str) {
+        let payload = text.as_bytes();
+        let mask = [0x12_u8, 0x34, 0x56, 0x78];
+        let mut frame = vec![0x81];
+        if payload.len() < 126 {
+            frame.push(0x80 | u8::try_from(payload.len()).unwrap());
+        } else {
+            frame.push(0x80 | 126);
+            frame.extend_from_slice(&u16::try_from(payload.len()).unwrap().to_be_bytes());
+        }
+        frame.extend_from_slice(&mask);
+        frame.extend(
+            payload
+                .iter()
+                .enumerate()
+                .map(|(index, byte)| byte ^ mask[index % 4]),
+        );
+        stream.write_all(&frame).unwrap();
+        stream.flush().unwrap();
+    }
+
+    fn read_server_text(reader: &mut BufReader<TcpStream>) -> String {
+        let mut header_bytes = [0_u8; 2];
+        reader.read_exact(&mut header_bytes).unwrap();
+        assert_eq!(header_bytes[0], 0x81);
+        assert_eq!(header_bytes[1] & 0x80, 0);
+        let mut length = u64::from(header_bytes[1] & 0x7f);
+        if length == 126 {
+            let mut bytes = [0_u8; 2];
+            reader.read_exact(&mut bytes).unwrap();
+            length = u64::from(u16::from_be_bytes(bytes));
+        } else if length == 127 {
+            let mut bytes = [0_u8; 8];
+            reader.read_exact(&mut bytes).unwrap();
+            length = u64::from_be_bytes(bytes);
+        }
+        let mut payload = vec![0_u8; usize::try_from(length).unwrap()];
+        reader.read_exact(&mut payload).unwrap();
+        String::from_utf8(payload).unwrap()
+    }
+
+    fn assert_session_invalid(response: reqwest::blocking::Response) {
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .unwrap(),
+            PHOTOSHOP_UXP_ORIGIN
+        );
+        assert_eq!(
+            response.json::<serde_json::Value>().unwrap(),
+            json!({
+                "error": {
+                    "code": "photoshop_session_invalid",
+                    "message": "Photoshop session is not live."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn unknown_route_is_one_closed_json_failure_from_the_real_gateway() {
+        let gateway = TestGateway::start();
+        let response = client()
+            .get(gateway.url("/photoshop/not-a-route"))
+            .send()
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            response.json::<serde_json::Value>().unwrap(),
+            json!({
+                "error": {
+                    "code": "photoshop_protocol_invalid",
+                    "message": "Photoshop gateway route does not exist."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn malformed_percent_encoded_route_parameter_uses_the_closed_json_failure() {
+        let gateway = TestGateway::start();
+        let response = client()
+            .get(gateway.url("/photoshop/commands/%FF/content"))
+            .send()
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response.json::<serde_json::Value>().unwrap(),
+            json!({
+                "error": {
+                    "code": "photoshop_protocol_invalid",
+                    "message": "Photoshop gateway path parameter is invalid."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn session_route_rejects_options_and_head_as_closed_methods() {
+        let gateway = TestGateway::start();
+        let client = client();
+        let options = client
+            .request(reqwest::Method::OPTIONS, gateway.url("/photoshop/session"))
+            .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+            .send()
+            .unwrap();
+        assert_eq!(options.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(
+            options.json::<serde_json::Value>().unwrap(),
+            json!({
+                "error": {
+                    "code": "photoshop_protocol_invalid",
+                    "message": "Photoshop gateway method is not allowed."
+                }
+            })
+        );
+
+        let head = client
+            .head(gateway.url("/photoshop/session"))
+            .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+            .send()
+            .unwrap();
+        assert_eq!(head.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(
+            head.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+    }
+
+    #[test]
+    fn command_content_exposes_only_get_and_its_exact_preflight() {
+        let gateway = TestGateway::start();
+        let client = client();
+        let path = gateway.url("/photoshop/commands/not-a-command/content");
+        let options = client
+            .request(reqwest::Method::OPTIONS, &path)
+            .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+            .header(header::ACCESS_CONTROL_REQUEST_METHOD.as_str(), "GET")
+            .header(
+                header::ACCESS_CONTROL_REQUEST_HEADERS.as_str(),
+                "authorization",
+            )
+            .send()
+            .unwrap();
+        assert_eq!(options.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            options
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+                .unwrap(),
+            "GET"
+        );
+        assert_eq!(
+            options
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+                .unwrap(),
+            "Authorization"
+        );
+
+        let head = client
+            .head(path)
+            .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+            .send()
+            .unwrap();
+        assert_eq!(head.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(
+            head.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+    }
+
+    #[test]
+    fn export_item_exposes_only_post_and_its_exact_preflight() {
+        let gateway = TestGateway::start();
+        let client = client();
+        let path = gateway.url("/photoshop/exports/not-a-command/items/not-an-item");
+        let options = client
+            .request(reqwest::Method::OPTIONS, &path)
+            .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+            .header(header::ACCESS_CONTROL_REQUEST_METHOD.as_str(), "POST")
+            .header(
+                header::ACCESS_CONTROL_REQUEST_HEADERS.as_str(),
+                "authorization, content-type",
+            )
+            .send()
+            .unwrap();
+        assert_eq!(options.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            options
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+                .unwrap(),
+            "POST"
+        );
+        assert_eq!(
+            options
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
+                .unwrap(),
+            "Authorization, Content-Type"
+        );
+
+        let get = client.get(path).send().unwrap();
+        assert_eq!(get.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(
+            get.json::<serde_json::Value>().unwrap(),
+            json!({
+                "error": {
+                    "code": "photoshop_protocol_invalid",
+                    "message": "Photoshop gateway method is not allowed."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn byte_route_perimeter_rejections_are_indistinguishable_and_use_static_cors() {
+        let gateway = TestGateway::start();
+        let client = client();
+        assert_session_invalid(
+            client
+                .get(gateway.url("/photoshop/commands/not-a-command/content"))
+                .send()
+                .unwrap(),
+        );
+        assert_session_invalid(
+            client
+                .post(gateway.url("/photoshop/exports/not-a-command/items/not-an-item"))
+                .header(header::ORIGIN.as_str(), "https://attacker.example")
+                .header(header::AUTHORIZATION.as_str(), "Bearer attacker")
+                .header(header::CONTENT_TYPE.as_str(), "image/png")
+                .body(vec![1_u8])
+                .send()
+                .unwrap(),
+        );
+        assert_session_invalid(
+            client
+                .get(gateway.url("/photoshop/commands/not-a-command/content"))
+                .header(header::AUTHORIZATION.as_str(), "Bearer first")
+                .header(header::AUTHORIZATION.as_str(), "Bearer second")
+                .send()
+                .unwrap(),
+        );
+    }
+
+    #[test]
+    fn websocket_wrong_subprotocol_is_one_closed_handshake_failure() {
+        let gateway = TestGateway::start();
+        let response = client()
+            .get(gateway.url("/photoshop/session"))
+            .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+            .header(header::CONNECTION.as_str(), "Upgrade")
+            .header(header::UPGRADE.as_str(), "websocket")
+            .header(header::SEC_WEBSOCKET_VERSION.as_str(), "13")
+            .header(
+                header::SEC_WEBSOCKET_KEY.as_str(),
+                "dGhlIHNhbXBsZSBub25jZQ==",
+            )
+            .header(header::SEC_WEBSOCKET_PROTOCOL.as_str(), "not-debrute")
+            .send()
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .unwrap(),
+            PHOTOSHOP_UXP_ORIGIN
+        );
+        assert_eq!(
+            response.json::<serde_json::Value>().unwrap(),
+            json!({
+                "error": {
+                    "code": "photoshop_protocol_invalid",
+                    "message": "Photoshop WebSocket handshake is invalid."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn malformed_websocket_upgrade_is_the_same_closed_handshake_failure() {
+        let gateway = TestGateway::start();
+        let response = client()
+            .get(gateway.url("/photoshop/session"))
+            .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+            .header(header::CONNECTION.as_str(), "Upgrade")
+            .header(header::UPGRADE.as_str(), "websocket")
+            .header(header::SEC_WEBSOCKET_VERSION.as_str(), "12")
+            .header(
+                header::SEC_WEBSOCKET_KEY.as_str(),
+                "dGhlIHNhbXBsZSBub25jZQ==",
+            )
+            .header(
+                header::SEC_WEBSOCKET_PROTOCOL.as_str(),
+                PHOTOSHOP_WEBSOCKET_SUBPROTOCOL,
+            )
+            .send()
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response.json::<serde_json::Value>().unwrap(),
+            json!({
+                "error": {
+                    "code": "photoshop_protocol_invalid",
+                    "message": "Photoshop WebSocket handshake is invalid."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn preflight_must_match_the_exact_byte_route_contract() {
+        let gateway = TestGateway::start();
+        let client = client();
+        assert_session_invalid(
+            client
+                .request(
+                    reqwest::Method::OPTIONS,
+                    gateway.url("/photoshop/commands/not-a-command/content"),
+                )
+                .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+                .send()
+                .unwrap(),
+        );
+        assert_session_invalid(
+            client
+                .request(
+                    reqwest::Method::OPTIONS,
+                    gateway.url("/photoshop/commands/not-a-command/content"),
+                )
+                .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD.as_str(), "POST")
+                .header(
+                    header::ACCESS_CONTROL_REQUEST_HEADERS.as_str(),
+                    "authorization, content-type",
+                )
+                .send()
+                .unwrap(),
+        );
+        assert_session_invalid(
+            client
+                .request(
+                    reqwest::Method::OPTIONS,
+                    gateway.url("/photoshop/exports/not-a-command/items/not-an-item"),
+                )
+                .header(header::ORIGIN.as_str(), PHOTOSHOP_UXP_ORIGIN)
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD.as_str(), "GET")
+                .header(
+                    header::ACCESS_CONTROL_REQUEST_HEADERS.as_str(),
+                    "authorization",
+                )
+                .send()
+                .unwrap(),
+        );
+    }
+
+    #[test]
+    fn cross_session_bearer_cannot_read_another_session_command() {
+        let gateway = TestGateway::start();
+        let mut first = TestWebSocket::connect(&gateway);
+        let second = TestWebSocket::connect(&gateway);
+        let integration = Arc::clone(&gateway.integration);
+        let canonical_root = gateway.canonical_root.clone();
+        let first_session_id = first.session_id.clone();
+        let sending = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .unwrap();
+            runtime.block_on(integration.send_project_file(
+                &canonical_root,
+                "source.png",
+                &first_session_id,
+                7,
+            ))
+        });
+        let place_request: serde_json::Value =
+            serde_json::from_str(&read_server_text(&mut first.reader)).unwrap();
+        assert_eq!(place_request["type"], "photoshop.place.request");
+        let command_id = place_request["commandId"].as_str().unwrap();
+
+        assert_session_invalid(
+            client()
+                .get(gateway.url(&format!("/photoshop/commands/{}/content", command_id)))
+                .header(
+                    header::AUTHORIZATION.as_str(),
+                    format!("Bearer {}", second.bearer),
+                )
+                .send()
+                .unwrap(),
+        );
+
+        drop(first.reader);
+        assert!(sending.join().unwrap().is_err());
+        drop(second.reader);
+    }
+
+    #[test]
+    fn cross_session_bearer_cannot_upload_to_another_session_command() {
+        let gateway = TestGateway::start();
+        let mut first = TestWebSocket::connect(&gateway);
+        let second = TestWebSocket::connect(&gateway);
+        write_masked_text(
+            first.reader.get_mut(),
+            &json!({
+                "type": "photoshop.export.start",
+                "commandId": "command-1",
+                "canonicalRoot": gateway.canonical_root,
+                "projectRevision": gateway.project_revision,
+                "directory": "",
+                "items": [{"itemId": "item-1", "sourceName": "Hero"}]
+            })
+            .to_string(),
+        );
+        let ready: serde_json::Value =
+            serde_json::from_str(&read_server_text(&mut first.reader)).unwrap();
+        assert_eq!(
+            ready,
+            json!({"type": "photoshop.export.ready", "commandId": "command-1"})
+        );
+
+        assert_session_invalid(
+            client()
+                .post(gateway.url("/photoshop/exports/command-1/items/item-1"))
+                .header(
+                    header::AUTHORIZATION.as_str(),
+                    format!("Bearer {}", second.bearer),
+                )
+                .header(header::CONTENT_TYPE.as_str(), "image/png")
+                .body(vec![1_u8])
+                .send()
+                .unwrap(),
+        );
+
+        drop(first.reader);
+        drop(second.reader);
+    }
+
+    #[test]
+    fn authorized_export_post_commits_and_returns_the_closed_success_shape() {
+        let gateway = TestGateway::start();
+        let mut session = TestWebSocket::connect(&gateway);
+        write_masked_text(
+            session.reader.get_mut(),
+            &json!({
+                "type": "photoshop.export.start",
+                "commandId": "command-1",
+                "canonicalRoot": gateway.canonical_root,
+                "projectRevision": gateway.project_revision,
+                "directory": "",
+                "items": [{"itemId": "item-1", "sourceName": "Hero"}]
+            })
+            .to_string(),
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&read_server_text(&mut session.reader))
+                .unwrap(),
+            json!({"type": "photoshop.export.ready", "commandId": "command-1"})
+        );
+
+        let response = client()
+            .post(gateway.url("/photoshop/exports/command-1/items/item-1"))
+            .header(
+                header::AUTHORIZATION.as_str(),
+                format!("Bearer {}", session.bearer),
+            )
+            .header(header::CONTENT_TYPE.as_str(), "image/png")
+            .body(b"png bytes".to_vec())
+            .send()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .unwrap(),
+            PHOTOSHOP_UXP_ORIGIN
+        );
+        assert_eq!(
+            response.json::<serde_json::Value>().unwrap(),
+            json!({"fileName": "Hero.png"})
+        );
+        assert_eq!(
+            fs::read(gateway._project.as_ref().join("Hero.png")).unwrap(),
+            b"png bytes"
+        );
+
+        drop(session.reader);
+    }
+
+    #[test]
+    fn authorized_export_payload_failure_uses_the_closed_error_envelope() {
+        let gateway = TestGateway::start();
+        let mut session = TestWebSocket::connect(&gateway);
+        write_masked_text(
+            session.reader.get_mut(),
+            &json!({
+                "type": "photoshop.export.start",
+                "commandId": "command-1",
+                "canonicalRoot": gateway.canonical_root,
+                "projectRevision": gateway.project_revision,
+                "directory": "",
+                "items": [{"itemId": "item-1", "sourceName": "Hero"}]
+            })
+            .to_string(),
+        );
+        let _ready = read_server_text(&mut session.reader);
+
+        let response = client()
+            .post(gateway.url("/photoshop/exports/command-1/items/item-1"))
+            .header(
+                header::AUTHORIZATION.as_str(),
+                format!("Bearer {}", session.bearer),
+            )
+            .header(header::CONTENT_TYPE.as_str(), "application/octet-stream")
+            .body(vec![1_u8])
+            .send()
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(
+            response.json::<serde_json::Value>().unwrap(),
+            json!({
+                "error": {
+                    "code": "invalid_transfer_payload",
+                    "message": "Photoshop export item must be image/png."
+                }
+            })
+        );
+
+        drop(session.reader);
+    }
+
+    #[test]
+    fn websocket_disconnect_revokes_its_bearer_at_the_real_http_boundary() {
+        let gateway = TestGateway::start();
+        let mut session = TestWebSocket::connect(&gateway);
+        let integration = Arc::clone(&gateway.integration);
+        let canonical_root = gateway.canonical_root.clone();
+        let session_id = session.session_id.clone();
+        let sending = thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .unwrap();
+            runtime.block_on(integration.send_project_file(
+                &canonical_root,
+                "source.png",
+                &session_id,
+                7,
+            ))
+        });
+        let place_request: serde_json::Value =
+            serde_json::from_str(&read_server_text(&mut session.reader)).unwrap();
+        let command_id = place_request["commandId"].as_str().unwrap();
+        let url = gateway.url(&format!("/photoshop/commands/{command_id}/content"));
+        let authorization = format!("Bearer {}", session.bearer);
+        let live = client()
+            .get(&url)
+            .header(header::AUTHORIZATION.as_str(), &authorization)
+            .send()
+            .unwrap();
+        assert_eq!(live.status(), StatusCode::OK);
+        assert_eq!(live.bytes().unwrap().as_ref(), b"project source");
+
+        drop(session.reader);
+        assert!(sending.join().unwrap().is_err());
+        assert_session_invalid(
+            client()
+                .get(url)
+                .header(header::AUTHORIZATION.as_str(), authorization)
+                .send()
+                .unwrap(),
+        );
+    }
+
+    #[test]
+    fn duplicate_host_and_origin_headers_are_closed_perimeter_failures() {
+        let gateway = TestGateway::start();
+        let duplicate_host = format!(
+            "GET /photoshop/commands/not-a-command/content HTTP/1.1\r\nHost: {}\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            gateway.address, gateway.address
+        );
+        let response = raw_http(&gateway, &duplicate_host);
+        assert!(response.starts_with("HTTP/1.1 403 "), "{response}");
+        assert!(response.contains("access-control-allow-origin: file://"));
+        assert!(response.contains("\"code\":\"photoshop_session_invalid\""));
+
+        let duplicate_origin = format!(
+            "GET /photoshop/commands/not-a-command/content HTTP/1.1\r\nHost: {}\r\nOrigin: file://\r\nOrigin: file://\r\nConnection: close\r\n\r\n",
+            gateway.address
+        );
+        let response = raw_http(&gateway, &duplicate_origin);
+        assert!(response.starts_with("HTTP/1.1 403 "), "{response}");
+        assert!(response.contains("\"code\":\"photoshop_session_invalid\""));
+    }
+
+    fn raw_http(gateway: &TestGateway, request: &str) -> String {
+        let mut stream = TcpStream::connect(gateway.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        stream.flush().unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    }
 
     #[test]
     fn uxp_origin_is_the_exact_file_origin_emitted_by_photoshop() {

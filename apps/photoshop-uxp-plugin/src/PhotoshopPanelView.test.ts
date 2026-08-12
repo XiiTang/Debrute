@@ -50,18 +50,34 @@ describe('PhotoshopPanelView presentation', () => {
         { canonicalRoot: 'project-10', name: 'Project 10', revision: 3 },
         { canonicalRoot: 'project-2', name: 'Project 2', revision: 5 }
       ],
-      directoryTrees: [
+      directoryPages: [
         {
           canonicalRoot: 'project-10',
+          directory: '',
           projectRevision: 3,
           status: 'loaded',
-          directories: ['', 'folder10', 'folder2', 'one', 'one/shared', 'two', 'two/shared']
+          childDirectories: ['folder10', 'folder2', 'one', 'two']
+        },
+        {
+          canonicalRoot: 'project-10',
+          directory: 'one',
+          projectRevision: 3,
+          status: 'loaded',
+          childDirectories: ['one/shared']
+        },
+        {
+          canonicalRoot: 'project-10',
+          directory: 'two',
+          projectRevision: 3,
+          status: 'loaded',
+          childDirectories: ['two/shared']
         },
         {
           canonicalRoot: 'project-2',
+          directory: '',
           projectRevision: 5,
           status: 'loading',
-          directories: []
+          childDirectories: []
         }
       ],
       expandedDirectories: [
@@ -84,7 +100,7 @@ describe('PhotoshopPanelView presentation', () => {
         label: 'Project 2',
         depth: 0,
         expanded: true,
-        children: [{ kind: 'loading', label: 'Loading directories…', depth: 1 }]
+        children: [{ kind: 'state', state: 'loading', label: 'Loading directories…', depth: 1 }]
       },
       {
         kind: 'project',
@@ -94,7 +110,12 @@ describe('PhotoshopPanelView presentation', () => {
         depth: 0,
         expanded: true,
         children: [
-          { kind: 'directory', label: 'folder2', directory: 'folder2' },
+          {
+            kind: 'directory',
+            label: 'folder2',
+            directory: 'folder2',
+            expandable: true
+          },
           { kind: 'directory', label: 'folder10', directory: 'folder10' },
           {
             kind: 'directory',
@@ -119,11 +140,12 @@ describe('PhotoshopPanelView presentation', () => {
     const snapshot = snapshotFixture();
     expect(destinationTreePresentation({
       ...snapshot,
-      directoryTrees: [{
+      directoryPages: [{
         canonicalRoot: 'project-1',
+        directory: '',
         projectRevision: 2,
         status: 'loaded',
-        directories: ['']
+        childDirectories: []
       }],
       expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: { ...snapshot.destination!, directory: '' }
@@ -138,11 +160,12 @@ describe('PhotoshopPanelView presentation', () => {
         { canonicalRoot: 'project-b', name: 'projectB', revision: 1 },
         { canonicalRoot: 'project-a', name: 'Projecta', revision: 1 }
       ],
-      directoryTrees: [{
+      directoryPages: [{
         canonicalRoot: 'project-b',
+        directory: '',
         projectRevision: 1,
         status: 'loaded',
-        directories: ['', 'folder10', 'Folder2', 'folder1']
+        childDirectories: ['folder10', 'Folder2', 'folder1']
       }],
       expandedDirectories: [{ canonicalRoot: 'project-b', directory: '' }],
       destination: {
@@ -170,7 +193,7 @@ describe('PhotoshopPanelView presentation', () => {
       ...snapshotFixture(),
       connection: { status: 'disconnected' as const },
       projects: [],
-      directoryTrees: []
+      directoryPages: []
     };
 
     expect(panelPresentation(snapshot)).toMatchObject({
@@ -211,6 +234,88 @@ describe('PhotoshopPanelView presentation', () => {
       sendDisabled: true
     });
   });
+
+  it('shows current-revision loading, error, and missing pages without using stale children', () => {
+    const base = snapshotFixture();
+    const snapshot: PhotoshopPluginSnapshot = {
+      ...base,
+      projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 3 }],
+      directoryPages: [
+        {
+          canonicalRoot: 'project-1',
+          directory: '',
+          projectRevision: 2,
+          status: 'loaded',
+          childDirectories: ['stale-child']
+        },
+        {
+          canonicalRoot: 'project-1',
+          directory: 'problem',
+          projectRevision: 3,
+          status: 'error',
+          childDirectories: [],
+          message: 'Project watcher unavailable.'
+        },
+        {
+          canonicalRoot: 'project-1',
+          directory: 'gone',
+          projectRevision: 3,
+          status: 'missing',
+          childDirectories: []
+        }
+      ],
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
+      destination: null
+    };
+
+    expect(destinationTreePresentation(snapshot).roots[0]?.children).toEqual([{
+      kind: 'state',
+      state: 'loading',
+      key: '9:project-1::loading',
+      label: 'Loading directories…',
+      depth: 1
+    }]);
+
+    const rootLoaded: PhotoshopPluginSnapshot = {
+      ...snapshot,
+      directoryPages: [
+        ...snapshot.directoryPages,
+        {
+          canonicalRoot: 'project-1',
+          directory: '',
+          projectRevision: 3,
+          status: 'loaded',
+          childDirectories: ['problem', 'gone']
+        }
+      ],
+      expandedDirectories: [
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'problem' },
+        { canonicalRoot: 'project-1', directory: 'gone' }
+      ]
+    };
+    const children = destinationTreePresentation(rootLoaded).roots[0]?.children;
+    expect(children?.find((child) => child.kind === 'directory' && child.directory === 'problem'))
+      .toMatchObject({
+        expandable: true,
+        expanded: true,
+        children: [{
+          kind: 'state',
+          state: 'error',
+          label: 'Could not load directories: Project watcher unavailable.'
+        }]
+      });
+    expect(children?.find((child) => child.kind === 'directory' && child.directory === 'gone'))
+      .toMatchObject({
+        expandable: true,
+        expanded: true,
+        children: [{
+          kind: 'state',
+          state: 'missing',
+          label: 'Directory is no longer available.'
+        }]
+      });
+  });
 });
 
 function snapshotFixture(): PhotoshopPluginSnapshot {
@@ -222,11 +327,12 @@ function snapshotFixture(): PhotoshopPluginSnapshot {
       items: [{ layerId: 8, name: 'Hero', kind: 'layer' }]
     },
     projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 2 }],
-    directoryTrees: [{
+    directoryPages: [{
       canonicalRoot: 'project-1',
+      directory: '',
       projectRevision: 2,
       status: 'loaded',
-      directories: ['', 'exports']
+      childDirectories: ['exports']
     }],
     expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
     destination: {

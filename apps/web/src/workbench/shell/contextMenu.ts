@@ -5,7 +5,8 @@ import {
   type PhotoshopPlacementRequirement,
   type PhotoshopStateView,
   type ProjectPathEntry,
-  type ProjectPathRef
+  type ProjectPathRef,
+  type ProjectTreeEntry
 } from '@debrute/app-protocol';
 import type { CanvasProjection, ProjectedCanvasNode } from '../canvas/CanvasScene';
 import type { CanvasCamera } from '../canvas/runtime/canvasCamera';
@@ -72,6 +73,7 @@ export interface PhotoshopDocumentTarget {
 
 export function buildWorkbenchContextMenuItems(input: {
   target: WorkbenchContextMenuTarget;
+  projectTree: readonly ProjectTreeEntry[];
   projection: CanvasProjection | undefined;
   fileClipboard?: WorkbenchFileClipboard | undefined;
   photoshop?: PhotoshopStateView | undefined;
@@ -135,15 +137,8 @@ export function buildWorkbenchContextMenuItems(input: {
   const singleSelection = resolved.length === 1
     ? resolved[0]
     : undefined;
-  const singleSelectionNode = singleSelection
-    ? projectedContextMenuNode(input.projection, singleSelection.projectRelativePath)
-    : undefined;
-  const photoshopEntry = singleSelection?.kind === 'file'
-    && singleSelectionNode?.availability.state === 'available'
-    ? {
-        ...singleSelection,
-        sizeBytes: singleSelectionNode.availability.size
-      }
+  const photoshopEntry = singleSelection?.projectRelativePath === input.target.invocation.projectRelativePath
+    ? photoshopEligibilityEntry(input)
     : undefined;
   const pathActions = compactMenuItems([
     explorerItem && resolved.length === 1
@@ -197,6 +192,25 @@ export function isPhotoshopTransferEligible(entry: ProjectPathEntry): boolean {
     return false;
   }
   return photoshopPlacementFormatForPath(entry.projectRelativePath) !== undefined;
+}
+
+function photoshopEligibilityEntry(input: {
+  target: WorkbenchContextMenuTarget;
+  projectTree: readonly ProjectTreeEntry[];
+  projection: CanvasProjection | undefined;
+}): ProjectPathEntry | undefined {
+  const path = input.target.invocation.projectRelativePath;
+  if (input.target.source === 'explorer') {
+    return input.projectTree.find((entry) => entry.projectRelativePath === path);
+  }
+  const node = projectedContextMenuNode(input.projection, path);
+  return node?.nodeKind === 'file' && node.availability.state === 'available'
+    ? {
+        projectRelativePath: node.projectRelativePath,
+        kind: node.nodeKind,
+        sizeBytes: node.availability.size
+      }
+    : undefined;
 }
 
 export function projectedContextMenuNode(
