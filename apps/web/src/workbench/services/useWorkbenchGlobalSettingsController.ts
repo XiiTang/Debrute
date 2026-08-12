@@ -178,7 +178,7 @@ function applyMutation(
       return {
         ...settings,
         feedback: {
-          catalog: [...settings.feedback.catalog, { name: mutation.name, icon: mutation.icon }],
+          catalog: [{ name: mutation.name, icon: mutation.icon }, ...settings.feedback.catalog],
           actionBar: settings.feedback.actionBar
         }
       };

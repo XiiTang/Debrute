@@ -65,10 +65,6 @@
   max-width: 180px;
 }
 
-.db-floating-bar.canvas-feedback-bar {
-  pointer-events: auto;
-}
-
 .canvas-shell {
   position: relative;
   height: 100%;
@@ -534,6 +530,7 @@
 .canvas-media-feedback-layer {
   position: absolute;
   inset: 0;
+  z-index: 3;
   pointer-events: none;
 }
 
@@ -778,97 +775,6 @@
   font-size: var(--db-font-xs);
 }
 
-.canvas-feedback-bar {
-  position: absolute;
-  display: grid;
-  grid-template-rows: 30px minmax(36px, auto);
-  align-content: start;
-  gap: 2px;
-  max-height: 124px;
-  padding: 3px;
-  overflow: hidden;
-  pointer-events: auto;
-  will-change: opacity;
-}
-
-.canvas-feedback-bar--has-comment-row {
-  grid-template-rows: 30px minmax(36px, auto);
-}
-
-.canvas-feedback-bar--marks-only {
-  grid-template-rows: 30px;
-  max-height: 38px;
-}
-
-.canvas-feedback-primary-row {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: start;
-  height: 30px;
-}
-
-.canvas-feedback-actions {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-}
-
-.canvas-feedback-mark-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.canvas-feedback-mark {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  flex: 0 0 auto;
-  box-shadow: none;
-}
-
-.canvas-feedback-mark .db-icon-button__icon {
-  transform: translateY(-0.5px);
-}
-
-.canvas-feedback-local-mode {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 2px;
-  padding-left: 6px;
-  background: var(--db-surface-2);
-}
-
-.canvas-feedback-comment-row {
-  position: relative;
-  top: -2px;
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-}
-
-.canvas-feedback-comment-strip {
-  min-width: 0;
-  max-width: 100%;
-  display: flex;
-  align-items: flex-start;
-  flex: 0 1 auto;
-  gap: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 5px 5px 1px 0;
-  scrollbar-width: thin;
-}
-
-.canvas-feedback-comment-strip:empty {
-  padding-right: 0;
-}
-
 .canvas-feedback-comment-pill {
   --canvas-feedback-comment-border: var(--db-border-muted);
   position: relative;
@@ -1009,57 +915,6 @@
 .canvas-feedback-comment-pill:hover .canvas-feedback-comment-pill-close.db-workbench-close-button .db-icon-button__icon,
 .canvas-feedback-comment-pill:focus-within .canvas-feedback-comment-pill-close.db-workbench-close-button .db-icon-button__icon {
   background: var(--db-surface-3);
-}
-
-.canvas-feedback-add-comment {
-  --canvas-feedback-comment-border: var(--db-border-muted);
-  position: relative;
-  height: 30px;
-  flex: 0 0 auto;
-  margin-top: 5px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 0;
-  background: var(--db-surface-2);
-  color: var(--db-text-muted);
-  font: inherit;
-  font-size: 12px;
-  line-height: 18px;
-  text-align: center;
-  cursor: pointer;
-  box-shadow: none;
-}
-
-.canvas-feedback-add-comment::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border: 1px solid var(--canvas-feedback-comment-border);
-  pointer-events: none;
-  transition:
-    border-color var(--db-duration-fast) var(--db-ease-standard);
-}
-
-.canvas-feedback-comment-strip:not(:empty) + .canvas-feedback-add-comment {
-  margin-left: 8px;
-}
-
-.canvas-feedback-add-comment:hover {
-  color: var(--db-text);
-}
-
-.canvas-feedback-add-comment:hover::before {
-  border-color: var(--db-border);
-}
-
-.canvas-feedback-add-comment:focus-visible {
-  color: var(--db-text);
-  outline: 0;
-}
-
-.canvas-feedback-add-comment:focus-visible::before {
-  border-width: 2px;
-  border-color: var(--db-focus);
 }
 
 .canvas-text-node {

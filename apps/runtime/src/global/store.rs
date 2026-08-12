@@ -576,10 +576,13 @@ fn create_feedback_mark(
     if settings.catalog.iter().any(|entry| entry.name == name) {
         return validation("Feedback catalog already contains this exact name.");
     }
-    settings.catalog.push(FeedbackCatalogEntry {
-        name: name.to_owned(),
-        icon: icon.to_owned(),
-    });
+    settings.catalog.insert(
+        0,
+        FeedbackCatalogEntry {
+            name: name.to_owned(),
+            icon: icon.to_owned(),
+        },
+    );
     Ok(())
 }
 
@@ -1020,6 +1023,15 @@ mod tests {
         create_feedback_mark(&mut settings, "é", "heart").unwrap();
         create_feedback_mark(&mut settings, "e\u{301}", "star").unwrap();
         create_feedback_mark(&mut settings, " like ", "thumbs-up").unwrap();
+        assert_eq!(
+            settings
+                .catalog
+                .iter()
+                .take(3)
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![" like ", "e\u{301}", "é"]
+        );
         assert!(settings.catalog.iter().any(|entry| entry.name == "é"));
         assert!(
             settings

@@ -85,6 +85,16 @@ describe('Workbench Canvas foundation', () => {
     );
   });
 
+  it('keeps image and video spatial Feedback above raster previews and below Canvas controls', () => {
+    const feedbackLayerRule = cssRule(canvasStyles, '.canvas-media-feedback-layer');
+    const rasterLayersRule = cssRule(canvasStyles, '.canvas-raster-preview-layers');
+    const contentZoneRule = cssRule(canvasStyles, '[data-canvas-node-zone="content"]::after');
+
+    expect(feedbackLayerRule).toContain('z-index: 3;');
+    expect(rasterLayersRule).toContain('z-index: 2;');
+    expect(contentZoneRule).toContain('z-index: 6;');
+  });
+
   it('keeps Audio and Video Media Chrome rectangular and the shared presentation scale data-driven', () => {
     const nodeRule = cssRule(canvasStyles, '.canvas-node-element');
     const presentationRule = cssRule(canvasStyles, '.canvas-node-presentation');

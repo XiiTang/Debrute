@@ -18,7 +18,10 @@ const AVAILABLE_MARKS = [
   { name: 'needs_revision', icon: 'warning-circle' }
 ] as const;
 
-const canvasStyles = readFileSync('apps/web/src/workbench/styles/canvas.css', 'utf8');
+const canvasStyles = [
+  readFileSync('apps/web/src/workbench/styles/canvas.css', 'utf8'),
+  readFileSync('apps/web/src/workbench/styles/feedback.css', 'utf8')
+].join('\n');
 
 describe('CanvasFeedbackBar', () => {
   it('keeps creators out of the action row and always renders the trailing Comment action', async () => {
@@ -350,6 +353,10 @@ describe('CanvasFeedbackBar', () => {
   it('renders image and video toolsets in the action row', async () => {
     const image = await renderBar({ localToolset: 'image' });
     expect(image.container.querySelector('[aria-label="Image region feedback tools"]')).not.toBeNull();
+    const localModeRule = cssRule('.canvas-feedback-local-mode');
+    expect(localModeRule).toContain('gap: 4px;');
+    expect(localModeRule).not.toContain('background:');
+    expect(localModeRule).not.toContain('padding');
     await image.unmount();
 
     const video = await renderBar({ localToolset: 'video', canStartVideoMomentFeedback: true });

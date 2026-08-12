@@ -20,6 +20,7 @@ const browserScreenshotDirectory = process.env.DEBRUTE_BROWSER_SCREENSHOT_DIR?.t
   : undefined;
 const activityOnly = process.argv.slice(2).includes('--activity-only');
 const windowGesturesOnly = process.argv.slice(2).includes('--window-gestures-only');
+const feedbackOnly = process.argv.slice(2).includes('--feedback-only');
 const fixtureRoot = join(workspaceRoot, 'build', `browser-verification-project-${process.pid}`);
 const fixtureHome = join(fixtureRoot, '.home');
 const fixtureTemporaryDirectory = join(
@@ -55,7 +56,9 @@ async function main() {
     browser = await chromium.launch();
     context = await browser.newContext({ deviceScaleFactor: 2 });
     page = await context.newPage();
-    if (windowGesturesOnly) {
+    if (feedbackOnly) {
+      await runFeedbackViewportVerification(context, page, { launchUrl, projectOpenUrl });
+    } else if (windowGesturesOnly) {
       await runWindowGestureViewportVerification(
         context,
         page,
@@ -379,6 +382,17 @@ async function runWindowGestureViewportVerification(context, page, urls, viewpor
   console.log(`[${label}] Focused Workbench window gesture browser verification passed.`);
 }
 
+async function runFeedbackViewportVerification(context, page, urls) {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await waitForWorkbenchOrigin(context, urls.launchUrl);
+  await page.goto(urls.projectOpenUrl, { waitUntil: 'domcontentloaded', timeout: 120000 });
+  await page.getByTestId('workbench-shell').waitFor({ state: 'visible', timeout: 60000 });
+  await page.getByTestId('floating-dock').waitFor({ state: 'visible', timeout: 60000 });
+  await assertFeedbackSettingsWorkflow(page, 'feedback-only');
+  await assertCanvasImageWorkflow(page, 'feedback-only');
+  console.log('[feedback-only] Feedback Settings pointer workflow and image spatial Feedback hit target passed.');
+}
+
 async function runViewportVerification(context, page, urls, viewport, label, targetScrollTop, fullCanvasWorkflow) {
   await page.setViewportSize(viewport);
   if (urls.launchUrl) {
@@ -590,7 +604,44 @@ async function assertCanvasImageWorkflow(page, label) {
   if (await imageNode.getByRole('button', { name: 'Retry' }).count() > 0) {
     throw new Error(`[${label}] Canvas image preview exposed a retry error.`);
   }
+  await assertCanvasImageSpatialFeedbackHitTarget(page, imageNode, label);
   console.log(`[${label}] Canvas image preview loaded through the Runtime Project media route.`);
+}
+
+async function assertCanvasImageSpatialFeedbackHitTarget(page, imageNode, label) {
+  await moveToVisibleElementPoint(page, imageNode, label, 'Canvas image Feedback target');
+  const feedbackBar = page.locator('.canvas-feedback-bar[data-canvas-feedback-bar="true"]:visible').first();
+  await feedbackBar.waitFor({ state: 'visible', timeout: 10000 });
+  const pin = feedbackBar.getByRole('button', { name: 'Add feedback pin', exact: true });
+  const rectangle = feedbackBar.getByRole('button', { name: 'Add feedback rectangle', exact: true });
+  const layer = imageNode.locator('[data-canvas-media-feedback-layer="true"]');
+  const previewLayers = imageNode.locator('.canvas-raster-preview-layers');
+
+  for (const tool of [pin, rectangle]) {
+    await tool.click();
+    await layer.waitFor({ state: 'visible', timeout: 5000 });
+    const hitContract = await layer.evaluate((element, previewElement) => {
+      const rect = element.getBoundingClientRect();
+      const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const hit = document.elementFromPoint(point.x, point.y);
+      return {
+        editing: element.classList.contains('editing'),
+        layerZIndex: getComputedStyle(element).zIndex,
+        previewZIndex: previewElement instanceof HTMLElement
+          ? getComputedStyle(previewElement).zIndex
+          : undefined,
+        hitIsLayer: hit === element || (hit instanceof Node && element.contains(hit)),
+        hitClassName: hit instanceof HTMLElement ? hit.className : undefined
+      };
+    }, await previewLayers.elementHandle());
+    if (!hitContract.editing
+      || Number(hitContract.layerZIndex) <= Number(hitContract.previewZIndex)
+      || !hitContract.hitIsLayer) {
+      throw new Error(`[${label}] Canvas image spatial Feedback was covered by the raster preview: ${JSON.stringify(hitContract)}.`);
+    }
+  }
+  await rectangle.click();
+  console.log(`[${label}] Image pin and rectangle modes own the real browser hit target above the raster preview.`);
 }
 
 async function assertCanvasVideoWorkflow(page, label) {
@@ -1256,6 +1307,16 @@ async function assertWorkbenchChrome(page, label) {
   await feedbackPanel.waitFor({ state: 'visible', timeout: 10000 });
   await feedbackPanel.getByText('No feedback yet.').waitFor({ state: 'visible', timeout: 10000 });
   await assertNoVisibleSingleLineTextClipping(page, `${label} Feedback panel`);
+  await assertFeedbackSettingsWorkflow(page, label);
+  await dock.getByRole('button', { name: 'Feedback', exact: true }).click();
+  await dock.getByRole('button', { name: 'Inspector', exact: true }).click();
+  await assertFloatingPanelTypography(page, dock, label, 'Explorer');
+  await assertFloatingPanelTypography(page, dock, label, 'Terminal');
+  console.log(`[${label}] Workbench launch, title bar, five FloatingDock panels, Feedback settings, and minimap rendered.`);
+}
+
+async function assertFeedbackSettingsWorkflow(page, label) {
+  const dock = page.getByTestId('floating-dock');
   await dock.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByTestId('floating-panel-settings').waitFor({ state: 'visible', timeout: 10000 });
   const settingsPanel = page.getByTestId('floating-panel-settings');
@@ -1264,57 +1325,120 @@ async function assertWorkbenchChrome(page, label) {
   await settingsPanel.getByRole('heading', { name: 'Floating Feedback Bar', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
   await assertNoVisibleSingleLineTextClipping(page, `${label} Feedback settings`);
-  const actionCount = await settingsPanel.locator('.feedback-action-bar-preview__item').count();
-  const catalogCount = await settingsPanel.locator('.feedback-catalog-row').count();
+  const actionItems = settingsPanel.locator('.feedback-action-bar-preview__item');
+  const catalogItems = settingsPanel.locator('[data-feedback-catalog-name]');
+  const actionCount = await actionItems.count();
+  const catalogCount = await catalogItems.count();
   if (actionCount !== 7 || catalogCount !== 7) {
     throw new Error(`[${label}] Feedback defaults expected 7 floating-bar items and 7 catalog entries, received ${actionCount} and ${catalogCount}.`);
   }
   const duplicateMembershipControls = await settingsPanel.locator(
-    '.feedback-catalog-row input[type="checkbox"], .feedback-catalog-create input[type="checkbox"], .feedback-action-bar-add'
+    '.feedback-catalog-card input[type="checkbox"], .feedback-action-bar-add'
   ).count();
   if (duplicateMembershipControls !== 0) {
     throw new Error(`[${label}] Feedback settings exposed a duplicate floating-bar membership control.`);
   }
   if (label === 'narrow') {
-    const persistedNames = await settingsPanel.locator('.feedback-action-bar-preview__item bdi').allTextContents();
+    const persistedNames = await actionItems.evaluateAll((items) => (
+      items.map((item) => item.getAttribute('data-feedback-action-name'))
+    ));
     if (!expectedPersistedFeedbackOrder
       || persistedNames.join('\u0000') !== expectedPersistedFeedbackOrder.join('\u0000')) {
       throw new Error(`[${label}] Feedback floating-bar order did not persist across Workbench connections.`);
     }
   }
-  if (label === 'desktop') {
-    await settingsPanel.getByRole('button', {
-      name: 'Remove “like” from the Floating Feedback Bar',
-      exact: true
-    }).click();
+  if (label === 'desktop' || label === 'feedback-only') {
+    const likeAction = settingsPanel.locator('[data-feedback-action-name="like"]');
+    const bar = settingsPanel.locator('[data-feedback-settings-bar="true"]');
+    const likeActionBox = await likeAction.boundingBox();
+    const barBox = await bar.boundingBox();
+    if (!likeActionBox || !barBox) {
+      throw new Error(`[${label}] Feedback Settings drag geometry was unavailable.`);
+    }
+    await page.mouse.move(
+      likeActionBox.x + likeActionBox.width / 2,
+      likeActionBox.y + likeActionBox.height / 2
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      barBox.x + barBox.width / 2,
+      barBox.y + barBox.height + 24,
+      { steps: 6 }
+    );
+    await page.mouse.up();
     await page.waitForFunction(() => (
       document.querySelectorAll('[data-testid="floating-panel-settings"] .feedback-action-bar-preview__item').length === 6
     ), undefined, { timeout: 10000 });
-    await settingsPanel.getByTitle('Drag “like” to the Floating Feedback Bar or activate its name to add it', { exact: true })
-      .dragTo(settingsPanel.locator('.feedback-action-bar-preview'));
+    const likeCard = settingsPanel.locator('[data-feedback-catalog-name="like"]');
+    const likeCardBox = await likeCard.boundingBox();
+    const reducedBarBox = await bar.boundingBox();
+    if (!likeCardBox || !reducedBarBox) {
+      throw new Error(`[${label}] Catalog-to-Bar drag geometry was unavailable.`);
+    }
+    await page.mouse.move(
+      likeCardBox.x + likeCardBox.width / 2,
+      likeCardBox.y + likeCardBox.height / 2
+    );
+    await page.mouse.down();
+    await page.mouse.move(reducedBarBox.x + 10, reducedBarBox.y + 18, { steps: 6 });
+    await page.mouse.up();
     await page.waitForFunction(() => (
       document.querySelectorAll('[data-testid="floating-panel-settings"] .feedback-action-bar-preview__item').length === 7
     ), undefined, { timeout: 10000 });
+
+    const createdName = `browser_feedback_${process.pid}`;
+    await settingsPanel.getByRole('button', { name: 'Choose an icon to create Feedback', exact: true }).click();
+    const picker = settingsPanel.locator('.feedback-icon-picker');
+    await picker.waitFor({ state: 'visible', timeout: 10000 });
+    if (await picker.locator('input').count() !== 0
+      || await picker.getByRole('button', { name: 'Close', exact: true }).count() !== 0) {
+      throw new Error(`[${label}] Feedback icon picker unexpectedly exposed search or close controls.`);
+    }
+    await picker.locator('.feedback-icon-picker__cell button').first().click();
+    const draftName = settingsPanel.getByRole('textbox', { name: 'Exact feedback name', exact: true });
+    await draftName.fill(createdName);
+    await draftName.press('Enter');
+    const createdCard = settingsPanel.locator(`[data-feedback-catalog-name="${createdName}"]`);
+    await createdCard.waitFor({ state: 'visible', timeout: 10000 });
+
+    const createdCardBox = await createdCard.boundingBox();
+    const expandedBarBox = await bar.boundingBox();
+    if (!createdCardBox || !expandedBarBox) {
+      throw new Error(`[${label}] Created Feedback drag geometry was unavailable.`);
+    }
+    await page.mouse.move(
+      createdCardBox.x + createdCardBox.width / 2,
+      createdCardBox.y + createdCardBox.height / 2
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      expandedBarBox.x + expandedBarBox.width - 10,
+      expandedBarBox.y + 18,
+      { steps: 6 }
+    );
+    await page.mouse.up();
+    await settingsPanel.locator(`[data-feedback-action-name="${createdName}"]`)
+      .waitFor({ state: 'visible', timeout: 10000 });
+
+    await createdCard.hover();
+    await createdCard.getByRole('button', { name: `Delete: ${createdName}`, exact: true }).click();
+    const deletionDialog = page.getByRole('dialog');
+    await deletionDialog.waitFor({ state: 'visible', timeout: 10000 });
+    if (!await deletionDialog.getByText(/unknown icon/).isVisible()) {
+      throw new Error(`[${label}] Feedback deletion did not explain the saved-project unknown icon fallback.`);
+    }
+    await deletionDialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await createdCard.waitFor({ state: 'detached', timeout: 10000 });
+    await settingsPanel.locator(`[data-feedback-action-name="${createdName}"]`)
+      .waitFor({ state: 'detached', timeout: 10000 });
+
     const restoredItems = settingsPanel.locator('.feedback-action-bar-preview__item');
-    await restoredItems.last().dragTo(restoredItems.nth(1));
-    await page.waitForFunction(() => (
-      (() => {
-        const names = [...document.querySelectorAll(
-          '[data-testid="floating-panel-settings"] .feedback-action-bar-preview__item bdi'
-        )].map((element) => element.textContent);
-        const likeIndex = names.indexOf('like');
-        return likeIndex > 0 && likeIndex < names.length - 1;
-      })()
-    ), undefined, { timeout: 10000 });
-    expectedPersistedFeedbackOrder = await restoredItems.locator('bdi').allTextContents();
+    expectedPersistedFeedbackOrder = await restoredItems.evaluateAll((items) => (
+      items.map((item) => item.getAttribute('data-feedback-action-name'))
+    ));
   }
   await saveBrowserScreenshot(page, `${label}-feedback-settings.png`);
   await dock.getByRole('button', { name: 'Settings', exact: true }).click();
-  await dock.getByRole('button', { name: 'Feedback', exact: true }).click();
-  await dock.getByRole('button', { name: 'Inspector', exact: true }).click();
-  await assertFloatingPanelTypography(page, dock, label, 'Explorer');
-  await assertFloatingPanelTypography(page, dock, label, 'Terminal');
-  console.log(`[${label}] Workbench launch, title bar, five FloatingDock panels, Feedback settings, and minimap rendered.`);
 }
 
 async function assertNoProjectWorkbenchTypography(page, label) {
