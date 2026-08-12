@@ -72,7 +72,7 @@ gateway.
 - [Photoshop Gateway Uses A Bounded Loopback Port Pool](./0065-photoshop-gateway-uses-a-bounded-loopback-port-pool.md)
 - [Runtime Owns One Global Activity Stream](./0066-runtime-owns-one-global-activity-stream.md)
 - [Project Identity Is The Canonical Root](./0067-project-identity-is-the-canonical-root.md)
-- [Plugin Integration Enablement Is Runtime Owned](./0068-plugin-integration-enablement-is-runtime-owned.md)
+- [Professional Application Integration Enablement Is Runtime Owned](./0068-professional-application-integration-enablement-is-runtime-owned.md)
 - [Product Removal Is Whole Product](./0073-product-removal-is-whole-product.md)
 - [Managed CLI Is Exposed As A User Command](./0074-managed-cli-is-exposed-as-a-user-command.md)
 - [Official Skills Are Product-Owned Projections](./0075-official-skills-are-product-owned-projections.md)

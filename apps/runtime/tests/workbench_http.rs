@@ -365,12 +365,12 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({ "operation": "set-photoshop-plugin-enabled", "enabled": true }))
+        .json(&json!({ "operation": "set-photoshop-integration-enabled", "enabled": true }))
         .send()
         .expect("Photoshop enable should complete");
     assert_eq!(enable.status().as_u16(), 200);
     assert_eq!(
-        events.next_of_type("globalSettings.changed")["settings"]["plugins"]["photoshop"]["enabled"],
+        events.next_of_type("globalSettings.changed")["settings"]["integrations"]["photoshop"]["enabled"],
         true
     );
     runtime
@@ -440,7 +440,7 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({ "operation": "set-photoshop-plugin-enabled", "enabled": false }))
+        .json(&json!({ "operation": "set-photoshop-integration-enabled", "enabled": false }))
         .send()
         .expect("busy Photoshop disable should complete");
     assert_eq!(rejected.status().as_u16(), 409);
@@ -457,7 +457,7 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
             .global()
             .settings_get()
             .unwrap()
-            .plugins
+            .integrations
             .photoshop
             .enabled
     );
@@ -477,7 +477,7 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
         .header(ORIGIN, runtime.origin())
         .header(COOKIE, &cookie)
         .header(WORKBENCH_CONNECTION_HEADER, &credential)
-        .json(&json!({ "operation": "set-photoshop-plugin-enabled", "enabled": false }))
+        .json(&json!({ "operation": "set-photoshop-integration-enabled", "enabled": false }))
         .send()
         .expect("idle Photoshop disable should complete");
     assert_eq!(disable.status().as_u16(), 200);
@@ -493,7 +493,7 @@ fn photoshop_enablement_is_runtime_owned_and_busy_disable_is_atomic() {
             .global()
             .settings_get()
             .unwrap()
-            .plugins
+            .integrations
             .photoshop
             .enabled
     );

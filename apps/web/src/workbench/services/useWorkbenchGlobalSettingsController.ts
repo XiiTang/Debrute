@@ -201,7 +201,7 @@ function applyMutation(
       };
     case 'set-feedback-action-bar':
       return { ...settings, feedback: { ...settings.feedback, actionBar: mutation.names } };
-    case 'set-photoshop-plugin-enabled':
+    case 'set-photoshop-integration-enabled':
     case 'save-model-setting':
       return settings;
   }
@@ -226,7 +226,7 @@ function mutationSatisfied(
       return !settings.feedback.catalog.some((entry) => entry.name === mutation.name)
         && !settings.feedback.actionBar.includes(mutation.name);
     case 'set-feedback-action-bar': return sameValue(settings.feedback.actionBar, mutation.names);
-    case 'set-photoshop-plugin-enabled': return settings.plugins.photoshop.enabled === mutation.enabled;
+    case 'set-photoshop-integration-enabled': return settings.integrations.photoshop.enabled === mutation.enabled;
     case 'save-model-setting': return false;
   }
 }
@@ -245,7 +245,7 @@ function mutationSupersessionKey(mutation: MutateDebruteGlobalSettingsInput): st
     case 'set-canvas-text-appearance':
     case 'set-hierarchy-edges-visible':
     case 'set-feedback-action-bar':
-    case 'set-photoshop-plugin-enabled':
+    case 'set-photoshop-integration-enabled':
       return mutation.operation;
     case 'set-feedback-mark-icon': return `${mutation.operation}:${mutation.name}`;
     case 'save-model-setting': return `${mutation.operation}:${mutation.modelId}`;
@@ -256,7 +256,7 @@ function mutationSupersessionKey(mutation: MutateDebruteGlobalSettingsInput): st
 }
 
 function isImmediateMutation(mutation: MutateDebruteGlobalSettingsInput): boolean {
-  return mutation.operation !== 'set-photoshop-plugin-enabled'
+  return mutation.operation !== 'set-photoshop-integration-enabled'
     && mutation.operation !== 'save-model-setting';
 }
 

@@ -105,7 +105,7 @@ function settingsFixture(locale: 'en' | 'zh-CN' = 'en'): DebruteGlobalSettingsVi
       }
     },
     chrome: { recentProjectRoots: [] },
-    plugins: { photoshop: { enabled: false } },
+    integrations: { photoshop: { enabled: false } },
     feedback: { catalog: [], actionBar: [] },
     models: { image: [], video: [], audio: [] }
   };

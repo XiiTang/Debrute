@@ -292,7 +292,7 @@ impl WorkbenchRuntimeServices {
         let photoshop_enabled = global
             .settings_get()
             .map_err(RuntimeHttpServiceError::from_global)?
-            .plugins
+            .integrations
             .photoshop
             .enabled;
         let photoshop = Arc::new(PhotoshopIntegration::new(
@@ -392,7 +392,7 @@ impl WorkbenchRuntimeServices {
         input: &crate::global::GlobalSettingsMutation,
     ) -> Result<DebruteGlobalSettingsView, RuntimeHttpServiceError> {
         let requested_photoshop_enabled = match input {
-            crate::global::GlobalSettingsMutation::SetPhotoshopPluginEnabled { enabled } => {
+            crate::global::GlobalSettingsMutation::SetPhotoshopIntegrationEnabled { enabled } => {
                 Some(*enabled)
             }
             _ => None,

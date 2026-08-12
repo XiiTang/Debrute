@@ -4,9 +4,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { PhotoshopStateView } from '@debrute/app-protocol';
 import { I18nProvider } from '../../i18n/index';
-import { PluginsSettingsPage } from './PluginsSettingsPage';
+import { IntegrationsSettingsPage } from './IntegrationsSettingsPage';
 
-describe('Plugins settings page', { tags: ['settings'] }, () => {
+describe('Integrations settings page', { tags: ['settings'] }, () => {
   it('renders the four Runtime-owned Photoshop statuses with exact diagnostics', () => {
     expect(renderPage('en', false, state('off'))).toContain('>Off</span>');
     expect(renderPage('en', true, state('waiting'))).toContain('Waiting for Photoshop');
@@ -36,7 +36,7 @@ describe('Plugins settings page', { tags: ['settings'] }, () => {
       });
 
       expect(save).toHaveBeenCalledWith({
-        operation: 'set-photoshop-plugin-enabled',
+        operation: 'set-photoshop-integration-enabled',
         enabled: true
       });
       expect(toggle.checked).toBe(false);
@@ -95,11 +95,11 @@ describe('Plugins settings page', { tags: ['settings'] }, () => {
 function page(
   enabled: boolean,
   photoshop: PhotoshopStateView,
-  save: (input: { operation: 'set-photoshop-plugin-enabled'; enabled: boolean }) => Promise<void>
+  save: (input: { operation: 'set-photoshop-integration-enabled'; enabled: boolean }) => Promise<void>
 ): React.ReactElement {
   return (
     <I18nProvider locale="en">
-      <PluginsSettingsPage
+      <IntegrationsSettingsPage
         settings={{ photoshop: { enabled } }}
         photoshop={photoshop}
         onSettingsChange={save}
@@ -115,7 +115,7 @@ function renderPage(
 ): string {
   return renderToStaticMarkup(
     <I18nProvider locale={locale}>
-      <PluginsSettingsPage
+      <IntegrationsSettingsPage
         settings={{ photoshop: { enabled } }}
         photoshop={photoshop}
         onSettingsChange={async () => undefined}
@@ -143,7 +143,7 @@ function state(
 function requireToggle(container: HTMLElement): HTMLInputElement {
   const toggle = container.querySelector('input[type="checkbox"]');
   if (!(toggle instanceof HTMLInputElement)) {
-    throw new Error('Expected Photoshop Integration switch.');
+    throw new Error('Expected Photoshop switch.');
   }
   return toggle;
 }

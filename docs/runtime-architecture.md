@@ -374,7 +374,8 @@ decisions are indexed under the
 
 Runtime's global store is the sole persistence boundary for Workbench
 preferences, Canvas-global settings, recent Project roots, model overrides,
-the Feedback Mark Catalog and Action Bar, Plugin Integration enablement, and API
+the Feedback Mark Catalog and Action Bar, Professional Application Integration
+enablement, and API
 keys. The Photoshop enable choice is a
 Global Settings field; its gateway health, retry, sessions, Documents,
 credentials, commands, and transfer state remain live-only. Canvas Text

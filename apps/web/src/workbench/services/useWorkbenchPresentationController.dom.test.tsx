@@ -104,7 +104,7 @@ function settingsFixture(
       }
     },
     chrome: { recentProjectRoots: [] },
-    plugins: { photoshop: { enabled: false } },
+    integrations: { photoshop: { enabled: false } },
     feedback: { catalog: [], actionBar: [] },
     models: { image: [], video: [], audio: [] }
   };

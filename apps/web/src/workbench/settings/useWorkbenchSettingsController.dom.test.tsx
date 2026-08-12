@@ -352,7 +352,7 @@ function settingsFixture(
     workbench: { locale: 'en', themePreference: 'dark' },
     canvas: { hierarchyEdgesVisible: true, textAppearance: appearance },
     chrome: { recentProjectRoots: [] },
-    plugins: { photoshop: { enabled: false } },
+    integrations: { photoshop: { enabled: false } },
     feedback: {
       catalog: [
         { name: 'like', icon: 'thumbs-up' },

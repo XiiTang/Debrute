@@ -8,7 +8,7 @@ import type {
 import type { EventProjection } from '../../types';
 import { GeneralSettingsPage } from './general/GeneralSettingsPage';
 import { AppearanceSettingsPage } from './appearance/AppearanceSettingsPage';
-import { PluginsSettingsPage } from './plugins/PluginsSettingsPage';
+import { IntegrationsSettingsPage } from './integrations/IntegrationsSettingsPage';
 import { AudioModelSettings, ImageModelSettings, VideoModelSettings } from './MediaModelSettingsPage';
 import { SettingsResourcePanel } from './SettingsResourcePanel';
 import { FeedbackSettingsPage } from './feedback/FeedbackSettingsPage';
@@ -37,9 +37,9 @@ const SETTINGS_NAV_GROUPS = [
     ]
   },
   {
-    id: 'plugins',
-    labelKey: 'settings.nav.pluginsGroup',
-    items: [{ id: 'plugins', labelKey: 'settings.nav.plugins', icon: Cable }]
+    id: 'integrations',
+    labelKey: 'settings.nav.integrationsGroup',
+    items: [{ id: 'integrations', labelKey: 'settings.nav.integrations', icon: Cable }]
   },
   {
     id: 'system',
@@ -158,14 +158,14 @@ export function SettingsPanel({
           >
             {(settings) => <AudioModelSettings settings={settings} actions={actions} kind="sound-effect" />}
           </SettingsResourcePanel>
-        ) : activePage === 'plugins' ? (
+        ) : activePage === 'integrations' ? (
           <SettingsResourcePanel
-            title={i18n.t('settings.plugins.title')}
-            resource={pluginsResource(state.globalSettings, state.photoshop)}
+            title={i18n.t('settings.integrations.title')}
+            resource={integrationsResource(state.globalSettings, state.photoshop)}
           >
             {(resource) => (
-              <PluginsSettingsPage
-                settings={resource.settings.plugins}
+              <IntegrationsSettingsPage
+                settings={resource.settings.integrations}
                 photoshop={resource.photoshop}
                 onSettingsChange={actions.mutateGlobalSettings}
               />
@@ -189,7 +189,7 @@ export function SettingsPanel({
   );
 }
 
-function pluginsResource(
+function integrationsResource(
   settings: EventProjection<DebruteGlobalSettingsView>,
   photoshop: EventProjection<PhotoshopStateView>
 ): EventProjection<{ settings: DebruteGlobalSettingsView; photoshop: PhotoshopStateView }> {
