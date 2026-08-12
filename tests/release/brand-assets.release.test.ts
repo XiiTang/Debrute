@@ -152,6 +152,14 @@ describe('brand assets', () => {
     );
 
     const result = await syncBrandAssets({ root });
+    await expectCenteredVisibleAlphaBounds(
+      join(root, 'apps/runtime/assets/tray-icon-macos-template.png'),
+      { width: [33, 35], height: [31, 33] }
+    );
+    await expectCenteredVisibleAlphaBounds(
+      join(root, 'apps/runtime/assets/tray-icon-windows.png'),
+      { width: [59, 61], height: [57, 59] }
+    );
     for (const target of result.targets) {
       const relativeTarget = target.slice(root.length + 1);
       expect(await readFile(target), relativeTarget).toEqual(
@@ -234,7 +242,10 @@ async function alphaCoverage(path: string): Promise<number> {
   return opaque / (info.width * info.height);
 }
 
-async function alphaEdgeMargins(path: string): Promise<{ left: number; top: number; right: number; bottom: number }> {
+async function alphaEdgeMargins(
+  path: string,
+  minimumAlpha = 0
+): Promise<{ left: number; top: number; right: number; bottom: number }> {
   const { data, info } = await sharp(path)
     .ensureAlpha()
     .raw()
@@ -242,13 +253,13 @@ async function alphaEdgeMargins(path: string): Promise<{ left: number; top: numb
   const alpha = (x: number, y: number) => data[(y * info.width + x) * info.channels + 3]!;
   const hasAlphaInColumn = (x: number) => {
     for (let y = 0; y < info.height; y += 1) {
-      if (alpha(x, y) > 0) return true;
+      if (alpha(x, y) > minimumAlpha) return true;
     }
     return false;
   };
   const hasAlphaInRow = (y: number) => {
     for (let x = 0; x < info.width; x += 1) {
-      if (alpha(x, y) > 0) return true;
+      if (alpha(x, y) > minimumAlpha) return true;
     }
     return false;
   };
@@ -261,6 +272,26 @@ async function alphaEdgeMargins(path: string): Promise<{ left: number; top: numb
   let bottom = 0;
   while (bottom < info.height && !hasAlphaInRow(info.height - 1 - bottom)) bottom += 1;
   return { left, top, right, bottom };
+}
+
+async function expectCenteredVisibleAlphaBounds(
+  path: string,
+  expected: { width: [number, number]; height: [number, number] }
+): Promise<void> {
+  const visibleAlphaThreshold = 16;
+  const metadata = await sharp(path).metadata();
+  const width = metadata.width!;
+  const height = metadata.height!;
+  const margins = await alphaEdgeMargins(path, visibleAlphaThreshold);
+  const alphaWidth = width - margins.left - margins.right;
+  const alphaHeight = height - margins.top - margins.bottom;
+
+  expect(alphaWidth).toBeGreaterThanOrEqual(expected.width[0]);
+  expect(alphaWidth).toBeLessThanOrEqual(expected.width[1]);
+  expect(alphaHeight).toBeGreaterThanOrEqual(expected.height[0]);
+  expect(alphaHeight).toBeLessThanOrEqual(expected.height[1]);
+  expect(Math.abs(margins.left - margins.right)).toBeLessThanOrEqual(1);
+  expect(Math.abs(margins.top - margins.bottom)).toBeLessThanOrEqual(1);
 }
 
 async function firstOpaqueXAtY(path: string, y: number): Promise<number> {

@@ -63,7 +63,8 @@ The mascot's internal proportions are fixed, while its complete composition
 occupies progressively more of the available canvas as output size decreases.
 Application profiles use 88% occupancy at 1024px, 90% through 512px, 92% at
 128px, and 94% at 64px and below. The favicon uses 92%; tray foregrounds use
-91% inside their platform-safe content bounds.
+91% directly inside their final platform canvas, without another transparent
+safe-area inset.
 
 Every profile scales and optically centers the whole character as one unit. It
 does not enlarge the head or face independently and does not crop the tiny body,

@@ -79,11 +79,11 @@ export async function syncBrandAssets({ root = defaultRoot } = {}) {
   await writeFile(resolve(root, desktopIcoTarget), icoBuffer(windowsIconPngs));
   await writeGeneratedPng(
     resolve(root, runtimeTrayMacosTarget),
-    await trayTemplateIconPng(svg, 36, 32)
+    await trayTemplateIconPng(svg, 36)
   );
   await writeGeneratedPng(
     resolve(root, runtimeTrayWindowsTarget),
-    await trayForegroundIconPng(svg, 66, 60)
+    await trayForegroundIconPng(svg, 66)
   );
 
   return {
@@ -165,8 +165,8 @@ async function foregroundIconPng(svg, size, occupancy) {
     .toBuffer();
 }
 
-async function trayTemplateIconPng(svg, size, contentSize) {
-  const content = await foregroundIconPng(svg, contentSize, trayMascotOccupancy);
+async function trayTemplateIconPng(svg, size) {
+  const content = await foregroundIconPng(svg, size, trayMascotOccupancy);
   const { data, info } = await sharp(content)
     .ensureAlpha()
     .raw()
@@ -185,28 +185,11 @@ async function trayTemplateIconPng(svg, size, contentSize) {
   const template = await sharp(pixels, {
     raw: { width: info.width, height: info.height, channels: 4 }
   }).png().toBuffer();
-  return centerOnTransparentCanvas(template, size);
+  return template;
 }
 
-async function trayForegroundIconPng(svg, size, contentSize) {
-  return centerOnTransparentCanvas(
-    await foregroundIconPng(svg, contentSize, trayMascotOccupancy),
-    size
-  );
-}
-
-async function centerOnTransparentCanvas(content, size) {
-  return sharp({
-    create: {
-      width: size,
-      height: size,
-      channels: 4,
-      background: { r: 0, g: 0, b: 0, alpha: 0 }
-    }
-  })
-    .composite([{ input: content, gravity: 'center' }])
-    .png()
-    .toBuffer();
+async function trayForegroundIconPng(svg, size) {
+  return foregroundIconPng(svg, size, trayMascotOccupancy);
 }
 
 async function writeGeneratedPng(target, png) {
