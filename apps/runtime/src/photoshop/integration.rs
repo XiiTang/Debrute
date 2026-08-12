@@ -13,10 +13,11 @@ use crate::{
     control::{RuntimeControlState, RuntimeStatus, RuntimeWorkPermit},
     project::{
         CanonicalProjectRoot, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath,
-        ProjectError, ProjectPathKind, ProjectSessionRegistry, ProjectSessionSummary,
-        ProjectUploadEntry, ProjectUse, ProjectUseKind, assert_project_tree_visible_path,
-        is_project_visible_path, list_project_directory, open_no_symlink_existing_project_file,
-        resolve_no_symlink_existing_project_path, resolve_project_path,
+        ProjectError, ProjectPathBatchAttempt, ProjectPathKind, ProjectSessionRegistry,
+        ProjectSessionSummary, ProjectUploadEntry, ProjectUse, ProjectUseKind,
+        assert_project_tree_visible_path, is_project_visible_path, list_project_directory,
+        open_no_symlink_existing_project_file, resolve_no_symlink_existing_project_path,
+        resolve_project_path,
     },
 };
 
@@ -990,8 +991,16 @@ impl PhotoshopIntegration {
                         },
                     )
                     .map_err(|error| export_project_error(&error))?;
-                if let ProjectCommandResult::PathsChanged { .. } = result.value {
-                    return Ok((file_name, result.project_revision));
+                match result.value {
+                    ProjectCommandResult::PathsAttempted {
+                        attempt: ProjectPathBatchAttempt::Applied(_),
+                        ..
+                    } => return Ok((file_name, result.project_revision)),
+                    ProjectCommandResult::PathsAttempted {
+                        attempt: ProjectPathBatchAttempt::Conflict,
+                        ..
+                    } => continue,
+                    _ => {}
                 }
                 return Err(PhotoshopError::new(
                     PhotoshopErrorCode::ExportFailed,

@@ -269,15 +269,16 @@ Workbenches share the same behavior.
 
 On Windows, reveal calls the Shell PIDL API directly; it does not start Explorer
 as a child process. Recoverable deletion does not invoke PowerShell, AppleScript,
-Finder, or another command interpreter. Runtime validates the whole requested
-Project batch, then starts one private copy of its current executable for each
-top-level item. The worker accepts only the canonical Project root, one admitted
-Project-relative path, and the expected filesystem identity and
-file-or-directory kind. It reopens the canonical root, repeats the complete
-no-symbolic-link containment and identity validation, and only then calls the
-operating system Trash or Recycle Bin Adapter. Runtime supervises each worker
-for 30 seconds, stops at the first failure, and performs no retry, rollback,
-compatibility fallback, or recovery journal.
+Finder, another command interpreter, or a private Runtime worker. Runtime first
+validates the complete disjoint batch against the canonical Project root,
+visibility, no-symbolic-link containment, existing kind, and Project-root
+exclusion. It then calls the operating system Trash or Recycle Bin Adapter once
+per top-level item, in request order, inside the Project mutation lane. A native
+failure is recorded for that item and the remaining items continue without
+retry or rollback. Only successful items reconcile Project Tree, Canvas,
+Feedback, and Working Copies; zero successes preserve the revision, while one
+or more successes publish one revision and one Project event. There is no Trash
+identity, undo record, compatibility fallback, or recovery journal.
 
 ## Executable Authorities
 

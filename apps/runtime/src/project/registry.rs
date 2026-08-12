@@ -15,11 +15,11 @@ use super::{
     CanvasFeedbackDiagnosticUpdate, CanvasFeedbackDocument, CanvasSourceResolutionView,
     CanvasStatePatch, CanvasStatePatchOutcome, ProjectChange, ProjectDirectoryPath, ProjectError,
     ProjectEvent, ProjectFileSourceTarget, ProjectNativeShellService, ProjectNodeAdapter,
-    ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathInspection, ProjectPathKind,
-    ProjectPathOperationStatus, ProjectRelativePath, ProjectResolvedFileSource, ProjectService,
-    ProjectSnapshot, ProjectSourceDigestResolver, ProjectSourceLease, ProjectSyncSnapshot,
-    ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput, copy_project_paths,
-    create_project_path, delete_project_paths, import_local_project_paths,
+    ProjectPathBatchAttempt, ProjectPathBatchItemResult, ProjectPathEntry, ProjectPathInspection,
+    ProjectPathKind, ProjectPathRef, ProjectRelativePath, ProjectResolvedFileSource,
+    ProjectService, ProjectSnapshot, ProjectSourceDigestResolver, ProjectSourceLease,
+    ProjectSyncSnapshot, ProjectTextFile, ProjectUploadEntry, UpdateCanvasFeedbackInput,
+    copy_project_paths, create_project_path, delete_project_paths, import_local_project_paths,
     import_upload_project_entries, move_project_paths, rename_project_path,
     watcher::{
         ProjectFileWatcher, ProjectWatchBackendFactory, ProjectWatchPath, ProjectWatchSignal,
@@ -59,9 +59,46 @@ pub enum ProjectStreamItem {
     Event(ProjectEvent),
 }
 
+/// Successful path effects derived once by the filesystem mutation owner.
+///
+/// Invalidated paths are pruned before source-to-target rewrites are applied.
+/// This lets the Project Tree, Canvas/Feedback state, and Working Copies consume
+/// the same successful subset for partially applied native operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectPathChangeSet {
+    invalidated_paths: Vec<String>,
+    rewrites: Vec<(String, String)>,
+}
+
+impl ProjectPathChangeSet {
+    #[must_use]
+    pub fn invalidated_paths(&self) -> &[String] {
+        &self.invalidated_paths
+    }
+
+    #[must_use]
+    pub fn rewrites(&self) -> &[(String, String)] {
+        &self.rewrites
+    }
+
+    #[must_use]
+    fn new(invalidated_paths: Vec<String>, rewrites: Vec<(String, String)>) -> Self {
+        Self {
+            invalidated_paths,
+            rewrites,
+        }
+    }
+
+    #[must_use]
+    fn is_empty(&self) -> bool {
+        self.invalidated_paths.is_empty() && self.rewrites.is_empty()
+    }
+}
+
 struct ProjectMutation<T> {
     value: T,
     change: Option<ProjectChange>,
+    path_changes: Option<ProjectPathChangeSet>,
 }
 
 impl<T> ProjectMutation<T> {
@@ -70,6 +107,7 @@ impl<T> ProjectMutation<T> {
         Self {
             value,
             change: Some(change),
+            path_changes: None,
         }
     }
 
@@ -78,7 +116,15 @@ impl<T> ProjectMutation<T> {
         Self {
             value,
             change: None,
+            path_changes: None,
         }
+    }
+
+    #[must_use]
+    fn with_path_changes(mut self, path_changes: ProjectPathChangeSet) -> Self {
+        debug_assert!(!path_changes.is_empty());
+        self.path_changes = Some(path_changes);
+        self
     }
 }
 
@@ -93,6 +139,9 @@ impl ProjectMutation<ProjectCommandResult> {
                 snapshot: current, ..
             }
             | ProjectCommandResult::PathsChanged {
+                snapshot: current, ..
+            }
+            | ProjectCommandResult::PathsAttempted {
                 snapshot: current, ..
             } => current.clone_from(snapshot),
             ProjectCommandResult::CanvasStateUpdated
@@ -190,6 +239,10 @@ pub enum ProjectCommandResult {
         results: Vec<ProjectPathBatchItemResult>,
         snapshot: ProjectSnapshot,
     },
+    PathsAttempted {
+        attempt: ProjectPathBatchAttempt,
+        snapshot: ProjectSnapshot,
+    },
 }
 
 pub struct OpenProjectSession {
@@ -211,8 +264,7 @@ pub trait ProjectPathStateReconciler: Send + Sync {
     fn reconcile(
         &self,
         canonical_root: &str,
-        command: &ProjectCommand,
-        result: &ProjectCommandResult,
+        changes: &ProjectPathChangeSet,
     ) -> Result<(), ProjectError>;
 
     /// Prunes path-keyed Working Copies after watcher-confirmed removal or
@@ -233,8 +285,7 @@ impl ProjectPathStateReconciler for NoopProjectPathStateReconciler {
     fn reconcile(
         &self,
         _canonical_root: &str,
-        _command: &ProjectCommand,
-        _result: &ProjectCommandResult,
+        _changes: &ProjectPathChangeSet,
     ) -> Result<(), ProjectError> {
         Ok(())
     }
@@ -958,7 +1009,6 @@ impl ProjectSession {
         &self,
         command: ProjectCommand,
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
-        let path_command = command.clone();
         let feedback_source = match &command {
             ProjectCommand::UpdateCanvasFeedback { input } => {
                 input.rendered_artifact_source_path().map(str::to_owned)
@@ -969,7 +1019,7 @@ impl ProjectSession {
         let result = self.commit_mutation_with(
             |service| {
                 let mut mutation = execute_project_command(service, command)?;
-                self.reconcile_path_state_in_mutation(service, &path_command, &mut mutation);
+                self.reconcile_path_state_in_mutation(service, &mut mutation);
                 Ok(mutation)
             },
             |result| {
@@ -1006,7 +1056,6 @@ impl ProjectSession {
         expected_revision: u64,
         command: ProjectCommand,
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
-        let path_command = command.clone();
         let delivery = lock(&self.delivery);
         let mut state = self.open_state()?;
         if state.project_revision != expected_revision {
@@ -1023,7 +1072,7 @@ impl ProjectSession {
             .checked_add(1)
             .ok_or(ProjectError::RevisionExhausted)?;
         let mut result = execute_project_command(&mut state.service, command)?;
-        self.reconcile_path_state_in_mutation(&mut state.service, &path_command, &mut result);
+        self.reconcile_path_state_in_mutation(&mut state.service, &mut result);
         let changed = result.change.is_some();
         if let Some(change) = result.change {
             state.project_revision = next_revision;
@@ -1050,61 +1099,86 @@ impl ProjectSession {
     /// revision admission lane as every filesystem mutation.
     ///
     /// # Errors
-    /// Returns a stale revision before any native effect or the exact native
-    /// shell error. A refresh failure after trash commits is reported on the
-    /// successful result as a diagnostic. Runtime does not automatically retry
-    /// a native effect.
+    /// Returns a batch-admission error before any native effect. Per-item native
+    /// failures are reported in the ordered result and never retried. A refresh
+    /// failure after trash commits is reported on the successful result as a
+    /// diagnostic.
     pub fn trash_paths(
         &self,
         native_shell: &ProjectNativeShellService,
-        entries: &[ProjectPathEntry],
+        entries: &[ProjectPathRef],
     ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
-        let command = ProjectCommand::DeletePaths {
-            entries: super::admit_project_path_entries(entries.to_vec())?,
-        };
+        self.trash_paths_with(entries, |root, entries| native_shell.trash(root, entries))
+    }
+
+    fn trash_paths_with(
+        &self,
+        entries: &[ProjectPathRef],
+        trash: impl FnOnce(
+            &CanonicalProjectRoot,
+            &[AdmittedProjectPathEntry],
+        ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError>,
+    ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
+        let entries = super::admit_project_path_entries(entries.to_vec())?;
         self.commit_mutation_with(
             |service| {
-                let trashed = native_shell.trash(service.root(), entries)?;
-                let results = trashed
-                    .into_iter()
-                    .map(|entry| ProjectPathBatchItemResult {
-                        source_project_relative_path: entry.project_relative_path.clone(),
-                        project_relative_path: entry.project_relative_path,
-                        kind: entry.kind,
-                        status: ProjectPathOperationStatus::Ok,
-                    })
-                    .collect::<Vec<_>>();
-                let changed_paths = entries
-                    .iter()
-                    .map(|entry| entry.project_relative_path.clone())
-                    .collect::<Vec<_>>();
-                let snapshot = service.reconcile_committed_path_mutation(&changed_paths, &[]);
-                let mut mutation = ProjectMutation::changed(
-                    ProjectCommandResult::PathsChanged {
-                        results,
-                        snapshot: snapshot.clone(),
-                    },
-                    ProjectChange::ProjectChanged(snapshot),
+                let results = trash(service.project_root(), &entries)?;
+                let path_changes = ProjectPathChangeSet::new(
+                    results
+                        .iter()
+                        .filter(|result| result.is_ok())
+                        .map(|result| result.source_project_relative_path().to_owned())
+                        .collect(),
+                    Vec::new(),
                 );
-                self.reconcile_path_state_in_mutation(service, &command, &mut mutation);
+                let snapshot = if path_changes.is_empty() {
+                    service.snapshot().clone()
+                } else {
+                    service.reconcile_committed_path_mutation(
+                        path_changes.invalidated_paths(),
+                        path_changes.rewrites(),
+                    )
+                };
+                let result = ProjectCommandResult::PathsChanged {
+                    results,
+                    snapshot: snapshot.clone(),
+                };
+                let mut mutation = if path_changes.is_empty() {
+                    ProjectMutation::unchanged(result)
+                } else {
+                    ProjectMutation::changed(result, ProjectChange::ProjectChanged(snapshot))
+                        .with_path_changes(path_changes)
+                };
+                self.reconcile_path_state_in_mutation(service, &mut mutation);
                 Ok(mutation)
             },
             |_| {},
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn trash_paths_for_test(
+        &self,
+        entries: &[ProjectPathRef],
+        trash: impl FnOnce(
+            &CanonicalProjectRoot,
+            &[AdmittedProjectPathEntry],
+        ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError>,
+    ) -> Result<ProjectRevisionResult<ProjectCommandResult>, ProjectError> {
+        self.trash_paths_with(entries, trash)
+    }
+
     fn reconcile_path_state_in_mutation(
         &self,
         service: &mut ProjectService,
-        command: &ProjectCommand,
         mutation: &mut ProjectMutation<ProjectCommandResult>,
     ) {
-        if !is_path_state_command(command) {
+        let Some(changes) = mutation.path_changes.as_ref() else {
             return;
-        }
+        };
         let error = self
             .path_state_reconciler
-            .reconcile(self.canonical_root(), command, &mutation.value)
+            .reconcile(self.canonical_root(), changes)
             .err();
         let errors = error.iter().map(ToString::to_string).collect::<Vec<_>>();
         let snapshot = service.complete_path_state_persistence(&errors);
@@ -1557,19 +1631,6 @@ fn execute_project_command(
     }
 }
 
-fn is_path_state_command(command: &ProjectCommand) -> bool {
-    matches!(
-        command,
-        ProjectCommand::CreatePath { .. }
-            | ProjectCommand::RenamePath { .. }
-            | ProjectCommand::CopyPaths { .. }
-            | ProjectCommand::MovePaths { .. }
-            | ProjectCommand::DeletePaths { .. }
-            | ProjectCommand::ImportLocalPaths { .. }
-            | ProjectCommand::ImportUploadEntries { .. }
-    )
-}
-
 fn execute_single_file_command(
     service: &mut ProjectService,
     command: ProjectCommand,
@@ -1607,25 +1668,10 @@ fn execute_single_file_command(
             let result =
                 create_project_path(service.root(), &parent_project_relative_path, &name, kind)?;
             let path = result.project_relative_path.clone();
-            let snapshot =
-                service.reconcile_committed_path_mutation(std::slice::from_ref(&path), &[]);
-            Ok(ProjectMutation::changed(
-                ProjectCommandResult::PathChanged {
-                    result,
-                    snapshot: snapshot.clone(),
-                },
-                ProjectChange::ProjectChanged(snapshot),
-            ))
-        }
-        ProjectCommand::RenamePath {
-            project_relative_path,
-            name,
-        } => {
-            let result = rename_project_path(service.root(), &project_relative_path, &name)?;
-            let target = result.project_relative_path.clone();
+            let path_changes = ProjectPathChangeSet::new(vec![path], Vec::new());
             let snapshot = service.reconcile_committed_path_mutation(
-                std::slice::from_ref(&target),
-                &[(project_relative_path.into_string(), target.clone())],
+                path_changes.invalidated_paths(),
+                path_changes.rewrites(),
             );
             Ok(ProjectMutation::changed(
                 ProjectCommandResult::PathChanged {
@@ -1633,7 +1679,31 @@ fn execute_single_file_command(
                     snapshot: snapshot.clone(),
                 },
                 ProjectChange::ProjectChanged(snapshot),
-            ))
+            )
+            .with_path_changes(path_changes))
+        }
+        ProjectCommand::RenamePath {
+            project_relative_path,
+            name,
+        } => {
+            let result = rename_project_path(service.root(), &project_relative_path, &name)?;
+            let target = result.project_relative_path.clone();
+            let path_changes = ProjectPathChangeSet::new(
+                vec![target.clone()],
+                vec![(project_relative_path.into_string(), target)],
+            );
+            let snapshot = service.reconcile_committed_path_mutation(
+                path_changes.invalidated_paths(),
+                path_changes.rewrites(),
+            );
+            Ok(ProjectMutation::changed(
+                ProjectCommandResult::PathChanged {
+                    result,
+                    snapshot: snapshot.clone(),
+                },
+                ProjectChange::ProjectChanged(snapshot),
+            )
+            .with_path_changes(path_changes))
         }
         _ => unreachable!("non-file command reached the single-file executor"),
     }
@@ -1643,81 +1713,134 @@ fn execute_file_batch_command(
     service: &mut ProjectService,
     command: ProjectCommand,
 ) -> Result<ProjectMutation<ProjectCommandResult>, ProjectError> {
-    let (results, removed, rewrites) = match command {
+    match command {
         ProjectCommand::CopyPaths {
             entries,
             target_directory,
         } => {
             let results = copy_project_paths(service.root(), &entries, &target_directory)?;
-            let removed = result_project_paths(&results).collect();
-            (results, removed, Vec::new())
+            let path_changes =
+                ProjectPathChangeSet::new(result_project_paths(&results).collect(), Vec::new());
+            Ok(changed_path_batch_mutation(service, results, path_changes))
         }
         ProjectCommand::MovePaths {
             entries,
             target_directory,
             overwrite,
         } => {
-            let results =
+            let attempt =
                 move_project_paths(service.root(), &entries, &target_directory, overwrite)?;
-            let rewrites = results
-                .iter()
-                .filter(|result| result.status == ProjectPathOperationStatus::Ok)
-                .filter(|result| {
-                    result.source_project_relative_path != result.project_relative_path
-                })
-                .map(|result| {
-                    (
-                        result.source_project_relative_path.clone(),
-                        result.project_relative_path.clone(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let removed = rewrites.iter().map(|(_, target)| target.clone()).collect();
-            (results, removed, rewrites)
+            Ok(attempted_path_batch_mutation(service, attempt, true))
         }
         ProjectCommand::DeletePaths { entries } => {
-            let removed = entries_project_paths(&entries);
             let results = delete_project_paths(service.root(), &entries)?;
-            (results, removed, Vec::new())
+            let path_changes = ProjectPathChangeSet::new(
+                result_source_project_paths(&results).collect(),
+                Vec::new(),
+            );
+            Ok(changed_path_batch_mutation(service, results, path_changes))
         }
         ProjectCommand::ImportLocalPaths {
             source_paths,
             target_directory,
             overwrite,
         } => {
-            let results = import_local_project_paths(
+            let attempt = import_local_project_paths(
                 service.root(),
                 &source_paths,
                 &target_directory,
                 overwrite,
             )?;
-            let removed = result_project_paths(&results).collect();
-            (results, removed, Vec::new())
+            Ok(attempted_path_batch_mutation(service, attempt, false))
         }
         ProjectCommand::ImportUploadEntries {
             entries,
             target_directory,
             overwrite,
         } => {
-            let results = import_upload_project_entries(
+            let attempt = import_upload_project_entries(
                 service.root(),
                 &entries,
                 &target_directory,
                 overwrite,
             )?;
-            let removed = result_project_paths(&results).collect();
-            (results, removed, Vec::new())
+            Ok(attempted_path_batch_mutation(service, attempt, false))
         }
         _ => unreachable!("non-batch command reached the file batch executor"),
-    };
-    let snapshot = service.reconcile_committed_path_mutation(&removed, &rewrites);
-    Ok(ProjectMutation::changed(
+    }
+}
+
+fn changed_path_batch_mutation(
+    service: &mut ProjectService,
+    results: Vec<ProjectPathBatchItemResult>,
+    path_changes: ProjectPathChangeSet,
+) -> ProjectMutation<ProjectCommandResult> {
+    if path_changes.is_empty() {
+        return ProjectMutation::unchanged(ProjectCommandResult::PathsChanged {
+            results,
+            snapshot: service.snapshot().clone(),
+        });
+    }
+    let snapshot = service.reconcile_committed_path_mutation(
+        path_changes.invalidated_paths(),
+        path_changes.rewrites(),
+    );
+    ProjectMutation::changed(
         ProjectCommandResult::PathsChanged {
             results,
             snapshot: snapshot.clone(),
         },
         ProjectChange::ProjectChanged(snapshot),
-    ))
+    )
+    .with_path_changes(path_changes)
+}
+
+fn attempted_path_batch_mutation(
+    service: &mut ProjectService,
+    attempt: ProjectPathBatchAttempt,
+    rewrite_sources: bool,
+) -> ProjectMutation<ProjectCommandResult> {
+    let ProjectPathBatchAttempt::Applied(results) = attempt else {
+        return ProjectMutation::unchanged(ProjectCommandResult::PathsAttempted {
+            attempt: ProjectPathBatchAttempt::Conflict,
+            snapshot: service.snapshot().clone(),
+        });
+    };
+    let mut invalidated_paths = Vec::with_capacity(results.len());
+    let mut rewrites = Vec::new();
+    for result in &results {
+        if !result.is_ok() {
+            continue;
+        }
+        invalidated_paths.push(result.project_relative_path().to_owned());
+        if rewrite_sources
+            && result.source_project_relative_path() != result.project_relative_path()
+        {
+            rewrites.push((
+                result.source_project_relative_path().to_owned(),
+                result.project_relative_path().to_owned(),
+            ));
+        }
+    }
+    let path_changes = ProjectPathChangeSet::new(invalidated_paths, rewrites);
+    if path_changes.is_empty() {
+        return ProjectMutation::unchanged(ProjectCommandResult::PathsAttempted {
+            attempt: ProjectPathBatchAttempt::Applied(results),
+            snapshot: service.snapshot().clone(),
+        });
+    }
+    let snapshot = service.reconcile_committed_path_mutation(
+        path_changes.invalidated_paths(),
+        path_changes.rewrites(),
+    );
+    ProjectMutation::changed(
+        ProjectCommandResult::PathsAttempted {
+            attempt: ProjectPathBatchAttempt::Applied(results),
+            snapshot: snapshot.clone(),
+        },
+        ProjectChange::ProjectChanged(snapshot),
+    )
+    .with_path_changes(path_changes)
 }
 
 fn project_snapshot_mutation(snapshot: ProjectSnapshot) -> ProjectMutation<ProjectCommandResult> {
@@ -1727,19 +1850,22 @@ fn project_snapshot_mutation(snapshot: ProjectSnapshot) -> ProjectMutation<Proje
     )
 }
 
-fn entries_project_paths(entries: &[AdmittedProjectPathEntry]) -> Vec<String> {
-    entries
-        .iter()
-        .map(|entry| entry.project_relative_path.to_string())
-        .collect()
-}
-
 fn result_project_paths(
     results: &[ProjectPathBatchItemResult],
 ) -> impl Iterator<Item = String> + '_ {
     results
         .iter()
-        .map(|result| result.project_relative_path.clone())
+        .filter(|result| result.is_ok())
+        .map(|result| result.project_relative_path().to_owned())
+}
+
+fn result_source_project_paths(
+    results: &[ProjectPathBatchItemResult],
+) -> impl Iterator<Item = String> + '_ {
+    results
+        .iter()
+        .filter(|result| result.is_ok())
+        .map(|result| result.source_project_relative_path().to_owned())
 }
 
 fn publish_event(state: &mut ProjectSessionState, event: &ProjectEvent) {

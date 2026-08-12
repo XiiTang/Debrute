@@ -5,24 +5,17 @@ import {
 import type { CanvasProjection } from '../canvas/CanvasScene';
 import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import { canvasNodeSelection, selectedNodeProjectRelativePaths } from '../canvas/runtime/canvasSelection';
-import type { ProjectExplorerController } from '../project-explorer/useProjectExplorerController';
+import type {
+  ProjectExplorerController,
+  ProjectExplorerEditCommand
+} from '../project-explorer/useProjectExplorerController';
 import type { ProjectPathCommandRouter } from './projectPathCommandRouter';
-import {
-  projectPathCommandEntryForCanvasNode,
-  resolveProjectPathCommandTarget
-} from './projectPathCommandTarget';
+import { projectPathCommandEntryForCanvasNode } from './projectPathCommandTarget';
 import type { WorkbenchMenuCommandId } from '../shell/workbenchTitleBarState';
 
-export type WorkbenchFocusCommand =
-  | 'escape'
-  | 'select-all'
-  | 'copy'
-  | 'cut'
-  | 'paste'
-  | 'trash'
-  | 'delete-permanently';
+export type WorkbenchFocusCommand = ProjectExplorerEditCommand;
 
-export type WorkbenchBehaviorOwner = 'canvas' | 'other';
+export type WorkbenchBehaviorOwner = 'canvas' | 'explorer' | 'other';
 
 export interface WorkbenchFocusCommandRouter {
   captureOwner(): WorkbenchBehaviorOwner;
@@ -33,15 +26,28 @@ export function createWorkbenchFocusCommandRouter(input: {
   getRuntime(): CanvasEditorRuntime | undefined;
   getProjection(): CanvasProjection | undefined;
   getCanvasRoot(): HTMLElement | null;
+  getExplorerRoot(): HTMLElement | null;
   getProjectPathRouter(): ProjectPathCommandRouter | undefined;
-  getExplorerController(): Pick<ProjectExplorerController, 'fileClipboard' | 'clearCut'> | undefined;
+  getExplorerController(): ProjectExplorerController | undefined;
 }): WorkbenchFocusCommandRouter {
-  const captureOwner = (): WorkbenchBehaviorOwner => (
-    document.activeElement === input.getCanvasRoot() ? 'canvas' : 'other'
-  );
+  const captureOwner = (): WorkbenchBehaviorOwner => {
+    const active = document.activeElement;
+    if (active === input.getCanvasRoot()) {
+      return 'canvas';
+    }
+    if (active === input.getExplorerRoot()) {
+      return 'explorer';
+    }
+    return 'other';
+  };
   return {
     captureOwner,
     dispatch(command, owner = captureOwner()) {
+      if (owner === 'explorer') {
+        const explorer = input.getExplorerController();
+        explorer?.handleEditCommand(command);
+        return true;
+      }
       const runtime = input.getRuntime();
       const pointerInteraction = runtime?.getSnapshot().pointerInteraction;
       if (command === 'escape' && pointerInteraction) {
@@ -56,11 +62,6 @@ export function createWorkbenchFocusCommandRouter(input: {
         return false;
       }
       if (command === 'escape') {
-        const explorer = input.getExplorerController();
-        if (explorer?.fileClipboard?.operation === 'cut') {
-          explorer.clearCut();
-          return true;
-        }
         if (runtime.getSnapshot().selection) {
           runtime.setSelection(undefined);
         }
@@ -71,25 +72,24 @@ export function createWorkbenchFocusCommandRouter(input: {
         runtime.setSelection(canvasNodeSelection(projection?.nodes.map((node) => node.projectRelativePath) ?? []));
         return true;
       }
-      const target = canvasCommandTarget(runtime, projection);
-      if (!target) {
+      const selectedPaths = selectedNodeProjectRelativePaths(runtime.getSnapshot().selection);
+      const nodesByPath = new Map(projection?.nodes.map((node) => [node.projectRelativePath, node]) ?? []);
+      const selection = selectedPaths.flatMap((path) => {
+        const node = nodesByPath.get(path);
+        return node ? [projectPathCommandEntryForCanvasNode(node)] : [];
+      });
+      if (selection.length === 0) {
         return true;
       }
       const router = input.getProjectPathRouter();
       if (!router) {
         return true;
       }
-      const resolvedTarget = resolveProjectPathCommandTarget(target);
-      if (command === 'paste' && (
-        resolvedTarget.selectionEntries.length !== 1
-        || resolvedTarget.selectionEntries[0]?.kind !== 'directory'
-      )) {
-        return true;
-      }
-      const projectPathCommand = command === 'trash'
-        ? 'delete'
-        : command;
-      router.run(projectPathCommand, { target, position: { x: 0, y: 0 } });
+      const target = { source: 'canvas' as const, invocation: selection[0]!, selection };
+      router.run(command === 'trash' ? 'delete' : command, {
+        target,
+        position: { x: 0, y: 0 }
+      });
       return true;
     }
   };
@@ -115,9 +115,7 @@ export function workbenchFocusCommandFromKeyboardEvent(
   const commandId = commandIds.find((candidate) => (
     workbenchCommandShortcutMatches(candidate, event, platform)
   ));
-  return commandId
-    ? workbenchFocusCommandFromMenuCommandId(commandId)
-    : undefined;
+  return commandId ? workbenchFocusCommandFromMenuCommandId(commandId) : undefined;
 }
 
 export function workbenchFocusCommandFromMenuCommandId(
@@ -131,21 +129,4 @@ export function workbenchFocusCommandFromMenuCommandId(
     case 'edit.delete': return 'trash';
     default: return undefined;
   }
-}
-
-function canvasCommandTarget(runtime: CanvasEditorRuntime, projection: CanvasProjection | undefined) {
-  const selectedPaths = selectedNodeProjectRelativePaths(runtime.getSnapshot().selection);
-  const nodesByPath = new Map(projection?.nodes.map((node) => [node.projectRelativePath, node]) ?? []);
-  const selectedEntries = selectedPaths.flatMap((path) => {
-    const node = nodesByPath.get(path);
-    return node ? [projectPathCommandEntryForCanvasNode(node)] : [];
-  });
-  if (selectedEntries.length === 0) {
-    return undefined;
-  }
-  return {
-    source: 'canvas' as const,
-    invocationEntry: selectedEntries[0]!,
-    selectedEntries
-  };
 }

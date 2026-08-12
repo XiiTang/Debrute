@@ -15,10 +15,14 @@ describe('CanvasPerfBrowserAdapter', () => {
 
     adapter.recordEvent(sessionStart('camera-pan:1', 'camera-pan'));
     adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
+    adapter.recordEvent(sessionStart('camera-zoom:2', 'camera-zoom'));
+    adapter.recordEvent(sessionEnd('camera-zoom:2', 'camera-zoom'));
 
     expect(marks.map((mark) => mark.name)).toEqual([
       'debrute:canvas:camera-pan:camera-pan:1:start',
-      'debrute:canvas:camera-pan:camera-pan:1:end'
+      'debrute:canvas:camera-pan:camera-pan:1:end',
+      'debrute:canvas:camera-zoom:camera-zoom:2:start',
+      'debrute:canvas:camera-zoom:camera-zoom:2:end'
     ]);
     expect(marks[1]?.detail).toEqual({
       durationMs: 50,
@@ -31,6 +35,10 @@ describe('CanvasPerfBrowserAdapter', () => {
       name: 'debrute:canvas:camera-pan:camera-pan:1',
       start: 'debrute:canvas:camera-pan:camera-pan:1:start',
       end: 'debrute:canvas:camera-pan:camera-pan:1:end'
+    }, {
+      name: 'debrute:canvas:camera-zoom:camera-zoom:2',
+      start: 'debrute:canvas:camera-zoom:camera-zoom:2:start',
+      end: 'debrute:canvas:camera-zoom:camera-zoom:2:end'
     }]);
   });
 
@@ -52,7 +60,7 @@ describe('CanvasPerfBrowserAdapter', () => {
     expect(measure).toHaveBeenCalledTimes(1);
   });
 
-  it('observes long animation frames only while sessions are active', () => {
+  it('observes long animation frames only while sessions are active', async () => {
     const callbacks: Array<(list: { getEntries(): unknown[] }) => void> = [];
     const observed: unknown[] = [];
     const disconnect = vi.fn();
@@ -86,6 +94,7 @@ describe('CanvasPerfBrowserAdapter', () => {
       }]
     });
     adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
+    await Promise.resolve();
 
     expect(observed).toEqual([{ type: 'long-animation-frame', buffered: false }]);
     expect(longAnimationFrames).toEqual([{
@@ -136,7 +145,7 @@ describe('CanvasPerfBrowserAdapter', () => {
     expect(longAnimationFrames).toEqual([]);
   });
 
-  it('samples full rAF frame intervals while a session is active', () => {
+  it('samples full rAF frame intervals while a session is active', async () => {
     const animationFrames = manualAnimationFrames();
     const frameIntervals: unknown[] = [];
     const adapter = createCanvasPerfBrowserAdapter({
@@ -152,6 +161,7 @@ describe('CanvasPerfBrowserAdapter', () => {
     animationFrames.fire(132);
     animationFrames.fire(182);
     adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
+    await Promise.resolve();
 
     expect(frameIntervals).toEqual([
       { timestamp: 116, source: 'CanvasPerfBrowserAdapter', frameIntervalMs: 16 },
@@ -161,7 +171,7 @@ describe('CanvasPerfBrowserAdapter', () => {
     expect(animationFrames.cancel).toHaveBeenCalledTimes(1);
   });
 
-  it('shares one sampler across overlapping sessions and stops after the last session', () => {
+  it('shares one sampler across overlapping sessions and stops after the last session', async () => {
     const animationFrames = manualAnimationFrames();
     const frameIntervals: unknown[] = [];
     const adapter = createCanvasPerfBrowserAdapter({
@@ -181,10 +191,51 @@ describe('CanvasPerfBrowserAdapter', () => {
     expect(animationFrames.pendingCount()).toBe(1);
     animationFrames.fire(116);
     adapter.recordEvent(sessionEnd('pointer-move-node:2', 'pointer-move-node'));
+    await Promise.resolve();
 
     expect(frameIntervals).toEqual([
       { timestamp: 116, source: 'CanvasPerfBrowserAdapter', frameIntervalMs: 16 }
     ]);
+    expect(animationFrames.pendingCount()).toBe(0);
+    expect(animationFrames.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps browser sampling continuous across a synchronous camera-session handoff', async () => {
+    const animationFrames = manualAnimationFrames();
+    const frameIntervals: unknown[] = [];
+    const disconnect = vi.fn();
+    const performanceObserverFactory = vi.fn(() => ({
+      observe: vi.fn(),
+      disconnect
+    }));
+    const adapter = createCanvasPerfBrowserAdapter({
+      performanceApi: { mark: vi.fn(), measure: vi.fn() },
+      supportedEntryTypes: ['long-animation-frame'],
+      performanceObserverFactory,
+      onLongAnimationFrame: vi.fn(),
+      requestAnimationFrame: animationFrames.request,
+      cancelAnimationFrame: animationFrames.cancel,
+      onFrameInterval: (frameInterval) => frameIntervals.push(frameInterval)
+    });
+
+    adapter.recordEvent(sessionStart('camera-pan:1', 'camera-pan'));
+    animationFrames.fire(100);
+    adapter.recordEvent(sessionEnd('camera-pan:1', 'camera-pan'));
+    adapter.recordEvent(sessionStart('camera-zoom:2', 'camera-zoom'));
+
+    expect(performanceObserverFactory).toHaveBeenCalledTimes(1);
+    expect(disconnect).not.toHaveBeenCalled();
+    expect(animationFrames.cancel).not.toHaveBeenCalled();
+
+    animationFrames.fire(116);
+    expect(frameIntervals).toEqual([
+      { timestamp: 116, source: 'CanvasPerfBrowserAdapter', frameIntervalMs: 16 }
+    ]);
+
+    adapter.recordEvent(sessionEnd('camera-zoom:2', 'camera-zoom'));
+    await Promise.resolve();
+
+    expect(disconnect).toHaveBeenCalledTimes(1);
     expect(animationFrames.pendingCount()).toBe(0);
     expect(animationFrames.cancel).toHaveBeenCalledTimes(1);
   });
@@ -242,8 +293,8 @@ describe('CanvasPerfBrowserAdapter', () => {
 });
 
 function sessionStart(
-  sessionId: 'camera-pan:1' | 'pointer-move-node:2',
-  sessionType: 'camera-pan' | 'pointer-move-node'
+  sessionId: 'camera-pan:1' | 'camera-zoom:2' | 'pointer-move-node:2',
+  sessionType: 'camera-pan' | 'camera-zoom' | 'pointer-move-node'
 ): CanvasPerfTraceEvent {
   return {
     kind: 'session-start',
@@ -251,13 +302,13 @@ function sessionStart(
     type: sessionType,
     timestamp: 100,
     source: 'CanvasSurface',
-    detail: { minimapOpen: false }
+    detail: { zoomLevel: 1 }
   };
 }
 
 function sessionEnd(
-  sessionId: 'camera-pan:1' | 'pointer-move-node:2',
-  sessionType: 'camera-pan' | 'pointer-move-node'
+  sessionId: 'camera-pan:1' | 'camera-zoom:2' | 'pointer-move-node:2',
+  sessionType: 'camera-pan' | 'camera-zoom' | 'pointer-move-node'
 ): CanvasPerfTraceEvent {
   return {
     kind: 'session-end',

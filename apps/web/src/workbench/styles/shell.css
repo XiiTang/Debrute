@@ -622,6 +622,10 @@ html[data-workbench-window-gesture="se"] * {
   overflow: auto;
 }
 
+.floating-panel-explorer .floating-panel-body {
+  overflow: hidden;
+}
+
 .floating-panel-terminal .floating-panel-body {
   overflow: visible;
 }

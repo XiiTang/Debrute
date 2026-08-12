@@ -1,21 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { DebruteShellApi } from '@debrute/app-protocol';
-import { createProjectTreeExternalDropPlan, hasProjectTreeExternalDrag } from './projectTreeExternalDrop';
+import { createProjectExternalDropSource, hasProjectTreeExternalDrag } from './projectTreeExternalDrop';
 
 describe('project tree external drop', () => {
   it('uses Electron local paths when the shell exposes dropped file paths', async () => {
     const file = new File(['cover'], 'cover.png');
 
-    await expect(createProjectTreeExternalDropPlan({
+    await expect(createProjectExternalDropSource({
       dataTransfer: dataTransferWithFiles([file]),
-      shell: shellApiFixture({
-        getDroppedFilePath: () => '/external/cover.png'
-      }),
-      targetDirectoryProjectRelativePath: 'assets'
+      shell: shellApiFixture({ getDroppedFilePath: () => '/external/cover.png' })
     })).resolves.toEqual({
-      localPaths: ['/external/cover.png'],
-      uploads: [],
-      targetDirectoryProjectRelativePath: 'assets'
+      kind: 'local-paths',
+      sourcePaths: ['/external/cover.png']
     });
   });
 
@@ -23,12 +19,11 @@ describe('project tree external drop', () => {
     const cover = new File(['cover'], 'cover.png');
     const notes = new File(['notes'], 'notes.md');
 
-    await expect(createProjectTreeExternalDropPlan({
+    await expect(createProjectExternalDropSource({
       dataTransfer: dataTransferWithFiles([cover, notes]),
       shell: shellApiFixture({
         getDroppedFilePath: (file) => file.name === 'cover.png' ? '/external/cover.png' : undefined
-      }),
-      targetDirectoryProjectRelativePath: 'assets'
+      })
     })).rejects.toThrow('Electron external drop did not expose every dropped file path.');
   });
 
@@ -54,24 +49,22 @@ describe('project tree external drop', () => {
     const file = new File(['page'], 'page.png');
     Object.defineProperty(file, 'webkitRelativePath', { value: 'pages/page.png' });
 
-    await expect(createProjectTreeExternalDropPlan({
+    await expect(createProjectExternalDropSource({
       dataTransfer: dataTransferWithFiles([file]),
-      shell: undefined,
-      targetDirectoryProjectRelativePath: 'assets'
+      shell: undefined
     })).resolves.toMatchObject({
-      localPaths: [],
-      uploads: [{
+      kind: 'uploads',
+      entries: [{
         file,
-        projectRelativePath: 'assets/pages/page.png'
-      }],
-      targetDirectoryProjectRelativePath: 'assets'
+        relativePath: 'pages/page.png'
+      }]
     });
   });
 
   it('walks browser directory entries when external folders are dropped', async () => {
     const file = new File(['page'], 'page.png');
 
-    await expect(createProjectTreeExternalDropPlan({
+    await expect(createProjectExternalDropSource({
       dataTransfer: {
         files: [],
         types: ['Files'],
@@ -82,29 +75,27 @@ describe('project tree external drop', () => {
           ])
         }]
       } as unknown as DataTransfer,
-      shell: undefined,
-      targetDirectoryProjectRelativePath: 'assets'
+      shell: undefined
     })).resolves.toMatchObject({
-      localPaths: [],
-      uploads: [
+      kind: 'uploads',
+      entries: [
         {
           kind: 'directory',
-          projectRelativePath: 'assets/pages'
+          relativePath: 'pages'
         },
         {
           kind: 'file',
           file,
-          projectRelativePath: 'assets/pages/page.png'
+          relativePath: 'pages/page.png'
         }
-      ],
-      targetDirectoryProjectRelativePath: 'assets'
+      ]
     });
   });
 
   it('rejects browser entry drops when only part of the batch exposes file entries', async () => {
     const cover = new File(['cover'], 'cover.png');
 
-    await expect(createProjectTreeExternalDropPlan({
+    await expect(createProjectExternalDropSource({
       dataTransfer: {
         files: [cover, new File(['notes'], 'notes.md')],
         types: ['Files'],
@@ -119,13 +110,12 @@ describe('project tree external drop', () => {
           }
         ]
       } as unknown as DataTransfer,
-      shell: undefined,
-      targetDirectoryProjectRelativePath: 'assets'
+      shell: undefined
     })).rejects.toThrow('Browser external drop did not expose every dropped file entry.');
   });
 
   it('keeps empty browser directories in the external import plan', async () => {
-    await expect(createProjectTreeExternalDropPlan({
+    await expect(createProjectExternalDropSource({
       dataTransfer: {
         files: [],
         types: ['Files'],
@@ -136,21 +126,19 @@ describe('project tree external drop', () => {
           ])
         }]
       } as unknown as DataTransfer,
-      shell: undefined,
-      targetDirectoryProjectRelativePath: 'assets'
+      shell: undefined
     })).resolves.toMatchObject({
-      localPaths: [],
-      uploads: [
+      kind: 'uploads',
+      entries: [
         {
           kind: 'directory',
-          projectRelativePath: 'assets/pages'
+          relativePath: 'pages'
         },
         {
           kind: 'directory',
-          projectRelativePath: 'assets/pages/empty'
+          relativePath: 'pages/empty'
         }
-      ],
-      targetDirectoryProjectRelativePath: 'assets'
+      ]
     });
   });
 
@@ -158,7 +146,7 @@ describe('project tree external drop', () => {
     const firstFile = new File(['first'], 'first.png');
     const secondFile = new File(['second'], 'second.png');
 
-    await expect(createProjectTreeExternalDropPlan({
+    await expect(createProjectExternalDropSource({
       dataTransfer: {
         files: [],
         types: ['Files'],
@@ -171,27 +159,25 @@ describe('project tree external drop', () => {
           ])
         }]
       } as unknown as DataTransfer,
-      shell: undefined,
-      targetDirectoryProjectRelativePath: 'assets'
+      shell: undefined
     })).resolves.toMatchObject({
-      localPaths: [],
-      uploads: [
+      kind: 'uploads',
+      entries: [
         {
           kind: 'directory',
-          projectRelativePath: 'assets/pages'
+          relativePath: 'pages'
         },
         {
           kind: 'file',
           file: firstFile,
-          projectRelativePath: 'assets/pages/first.png'
+          relativePath: 'pages/first.png'
         },
         {
           kind: 'file',
           file: secondFile,
-          projectRelativePath: 'assets/pages/second.png'
+          relativePath: 'pages/second.png'
         }
-      ],
-      targetDirectoryProjectRelativePath: 'assets'
+      ]
     });
   });
 });

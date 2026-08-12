@@ -4,7 +4,7 @@ import {
   workbenchCommandShortcutMatches,
   type DebruteProductPlatform,
   type DebruteWorkbenchRoute,
-  type ProjectPathEntry
+  type ProjectPathRef
 } from '@debrute/app-protocol';
 import {
   DebruteHttpRequestError,
@@ -45,8 +45,7 @@ import {
 } from './services/projectSessionState';
 import {
   createProjectBindingLifecycle,
-  type ProjectBindingLifecycle,
-  type ProjectBindingLifecycleOutcome
+  type ProjectBindingLifecycle
 } from './services/projectBindingLifecycle';
 import { reconcileWorkbenchViewportLayout } from './services/workbenchViewportLayout';
 import {
@@ -59,6 +58,7 @@ import {
   createProjectPathCommandRouter,
   type ProjectPathCommandRouter
 } from './services/projectPathCommandRouter';
+import { resolveProjectPathCommandTarget } from './services/projectPathCommandTarget';
 import {
   createWorkbenchFocusCommandRouter,
   workbenchFocusCommandFromKeyboardEvent,
@@ -66,15 +66,7 @@ import {
   type WorkbenchBehaviorOwner,
   type WorkbenchFocusCommandRouter
 } from './services/workbenchFocusCommandRouter';
-import {
-  createProjectPathCommandEffects,
-  type ProjectPathCommandEffects,
-  type ProjectPathEffectApiName
-} from './services/projectPathCommandEffects';
-import {
-  createProjectPathCommandIntake,
-  type AcceptedProjectPathCommandScope
-} from './services/projectPathCommandIntake';
+import { createProjectCommandGate } from './services/projectCommandGate';
 import {
   PendingWorkbenchContextMenuDismissal,
   WorkbenchContextMenu
@@ -91,14 +83,11 @@ import {
   type WorkbenchContextMenuPosition,
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
-import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
-import type { ProjectTreeSelectionState } from './project-explorer/projectTreeInteraction';
 import type { WorkbenchProjectProjectionState } from './services/WorkbenchProjectProjection';
 import {
-  projectPathDeletionConfirmationMessageForEntries,
-  projectTreeSelectionFromPaths
-} from './project-explorer/workbenchFileCommands';
-import type { ProjectExplorerController } from './project-explorer/useProjectExplorerController';
+  useProjectExplorerController,
+  type ProjectExplorerSelection
+} from './project-explorer/useProjectExplorerController';
 import {
   canvasHierarchyEdgeVisibilityButtonRect,
   canvasMinimapButtonRect,
@@ -163,6 +152,12 @@ function canvasContentIslandOwnerPath(target: Element): string | undefined {
 }
 
 const EMPTY_CANVAS_HIERARCHY_EDGES: CanvasProjection['edges'] = [];
+const ProjectTree = React.lazy(async () => {
+  workbenchStartupTimeline.markFeatureRequested('explorer');
+  const module = await import('./project-explorer/ProjectTree');
+  workbenchStartupTimeline.markFeatureReady('explorer');
+  return { default: module.ProjectTree };
+});
 const TerminalPanel = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('terminal');
   const module = await import('./terminal/TerminalPanel');
@@ -183,20 +178,6 @@ const WorkbenchSettingsPanelFeature = React.lazy(async () => {
   const module = await loadSettingsFeature();
   return { default: module.WorkbenchSettingsPanelFeature };
 });
-const loadExplorerFeature = async () => {
-  workbenchStartupTimeline.markFeatureRequested('explorer');
-  const module = await import('./project-explorer/ExplorerPanelFeature');
-  workbenchStartupTimeline.markFeatureReady('explorer');
-  return module;
-};
-const WorkbenchExplorerControllerHost = React.lazy(async () => {
-  const module = await loadExplorerFeature();
-  return { default: module.WorkbenchExplorerControllerHost };
-});
-const WorkbenchExplorerPanelFeature = React.lazy(async () => {
-  const module = await loadExplorerFeature();
-  return { default: module.WorkbenchExplorerPanelFeature };
-});
 const WorkbenchInspectorPanelFeature = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('inspector');
   const module = await import('./inspector/InspectorPanelFeature');
@@ -208,7 +189,7 @@ const WorkbenchFloatingTextEditorWindowFeature = React.lazy(async () => {
   return { default: module.WorkbenchFloatingTextEditorWindowFeature };
 });
 
-type WorkbenchBoundProjectApi = Omit<HttpWorkbenchApiClient, ProjectPathEffectApiName>;
+type WorkbenchBoundProjectApi = HttpWorkbenchApiClient;
 
 export function WorkbenchApp({
   api,
@@ -272,10 +253,6 @@ function WorkbenchRuntimeApp({
   const projectBindingLifecycleState = useSyncExternalStore(
     projectBindingLifecycle.subscribe,
     projectBindingLifecycle.getState
-  );
-  const projectPathCommandEffects = useMemo(
-    () => createProjectPathCommandEffects(api),
-    [api]
   );
   const [connectionEnded, setConnectionEnded] = useState<Error>();
   const [productRemovalAccepted, setProductRemovalAccepted] = useState(false);
@@ -360,25 +337,9 @@ function WorkbenchRuntimeApp({
           return;
         }
         initialProjectOpeningRef.current ??= projectBindingLifecycle.open(resolution.target);
-        const result = await initialProjectOpeningRef.current;
+        await initialProjectOpeningRef.current;
         if (disposed) {
           return;
-        }
-        if (result.outcome === 'failed') {
-          const attemptedPath = projectRootFromOpenError(result.error)
-            ?? resolution.projectOpen?.attemptedPath;
-          const error: ProjectOpenStartupError = {
-            code: 'project-open-failed',
-            message: result.error.message
-          };
-          const localizedError = localizedProjectOpenError(
-            error,
-            presentationController.getCurrentI18n()
-          );
-          setProjectOpenPresentation({
-            ...(attemptedPath ? { attemptedPath } : {}),
-            ...(localizedError ? { error: localizedError } : {})
-          });
         }
       } catch (error) {
         if (!disposed) {
@@ -402,7 +363,6 @@ function WorkbenchRuntimeApp({
 
   const boundProjectAppProps = {
     api,
-    projectPathCommandEffects,
     canvasTextRenderProfile,
     projectProjection,
     connectionEnded,
@@ -462,7 +422,6 @@ function WorkbenchRuntimeApp({
 
 function WorkbenchBoundProjectApp({
   api,
-  projectPathCommandEffects,
   canvasTextRenderProfile,
   projectProjection,
   connectionEnded,
@@ -479,7 +438,6 @@ function WorkbenchBoundProjectApp({
   isProjectOpening
 }: {
   api: WorkbenchBoundProjectApi;
-  projectPathCommandEffects: ProjectPathCommandEffects;
   canvasTextRenderProfile: ReturnType<typeof canvasTextRenderProfileForAppearance>;
   projectProjection: WorkbenchProjectProjectionState;
   connectionEnded: Error | undefined;
@@ -555,7 +513,7 @@ function WorkbenchBoundProjectApp({
       acceptedProject ? 'project-surface-committed' : 'project-open-surface-committed'
     );
   }, [acceptedProject, isLoading]);
-  const projectPathCommandIntake = useMemo(() => createProjectPathCommandIntake({
+  const projectCommandGate = useMemo(() => createProjectCommandGate({
     projectBindingLifecycle,
     projectProjection: api.projectProjection,
     isCommandSurfaceAvailable: () => projectPathCommandSurfaceAvailableRef.current
@@ -573,6 +531,53 @@ function WorkbenchBoundProjectApp({
     () => createInspectionTargetStore(),
     [projectProjection.generation]
   );
+  const confirmMoveOverwrite = useCallback((input: {
+    entries: readonly ProjectPathRef[];
+    targetDirectoryProjectRelativePath: string;
+  }) => (
+    window.confirm(i18n.t('shell.confirm.moveOverwrite', {
+      target: input.targetDirectoryProjectRelativePath || i18n.t('shell.confirm.projectRoot')
+    }))
+  ), [i18n]);
+  const permanentDeleteConfirmationLabels = useMemo(() => ({
+    directory: (path: string) => i18n.t('shell.confirm.permanentDeleteDirectory', { path }),
+    file: (path: string) => i18n.t('shell.confirm.permanentDeleteFile', { path }),
+    selectedItems: (count: number) => i18n.t('shell.confirm.permanentDeleteSelected', { count })
+  }), [i18n]);
+  const confirmPermanentDelete = useCallback((input: {
+    entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>;
+  }) => (
+    window.confirm(projectPathDeletionConfirmationMessageForEntries(input, permanentDeleteConfirmationLabels))
+  ), [permanentDeleteConfirmationLabels]);
+  const trashConfirmationLabels = useMemo(() => ({
+    directory: (path: string) => i18n.t('shell.confirm.trashDirectory', { path }),
+    file: (path: string) => i18n.t('shell.confirm.trashFile', { path }),
+    selectedItems: (count: number) => i18n.t('shell.confirm.trashSelected', { count })
+  }), [i18n]);
+  const confirmTrash = useCallback((input: {
+    entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }>;
+  }) => (
+    window.confirm(projectPathDeletionConfirmationMessageForEntries(input, trashConfirmationLabels))
+  ), [trashConfirmationLabels]);
+  const confirmExplorerDelete = useCallback((input: {
+    mode: 'trash' | 'permanent';
+    entries: readonly ProjectPathRef[];
+  }) => input.mode === 'trash'
+    ? confirmTrash({ entries: [...input.entries] })
+    : confirmPermanentDelete({ entries: [...input.entries] }), [confirmPermanentDelete, confirmTrash]);
+  const publishExplorerInspectionSelection = useCallback((selection: ProjectExplorerSelection) => {
+    inspectionTargetStore.publishPaths(selection.selectedPaths);
+  }, [inspectionTargetStore]);
+  const explorerController = useProjectExplorerController({
+    api,
+    commandGate: projectCommandGate,
+    snapshot,
+    projectRevision: acceptedProject?.projectRevision ?? 0,
+    activities: projectActivities,
+    confirmOverwrite: confirmMoveOverwrite,
+    confirmDelete: confirmExplorerDelete,
+    onInspectionSelectionChange: publishExplorerInspectionSelection
+  });
   const canvasStateChangeIntake = useMemo(
     () => createCanvasStateChangeIntake(),
     [canvasRuntimeScopeKey]
@@ -584,11 +589,10 @@ function WorkbenchBoundProjectApp({
   const windowHostRef = useRef<WorkbenchWindowHostHandle>(null);
   const [requestedTerminal, setRequestedTerminal] = useState<{
     cwdProjectRelativePath: string;
-    scope: AcceptedProjectPathCommandScope;
   } | null>(null);
   const canSubmitRequestedTerminal = useCallback(
-    () => requestedTerminal?.scope.canSubmit() ?? false,
-    [requestedTerminal]
+    () => projectCommandGate.available(),
+    [projectCommandGate]
   );
   const consumeRequestedTerminal = useCallback(() => {
     setRequestedTerminal(null);
@@ -748,10 +752,10 @@ function WorkbenchBoundProjectApp({
       node,
       surfaceSize: runtimeSnapshot.surfaceSize,
       camera: runtimeSnapshot.camera
-    }));
+    }), 'programmatic');
   }, [canvasRuntime]);
   const locateProjectFileInCanvas = useCallback(async (projectRelativePath: string) => {
-    const scope = projectPathCommandIntake.tryAccept();
+    const scope = projectCommandGate.accept();
     if (!scope) {
       return;
     }
@@ -770,7 +774,11 @@ function WorkbenchBoundProjectApp({
         ...workspaceBefore.expandedDirectories,
         ...canvasPathAncestors(projectRelativePath)
       ]));
-      await api.patchCanvasState({ expandedDirectories });
+      const request = scope.submit(() => api.patchCanvasState({ expandedDirectories }));
+      if (!request) {
+        return;
+      }
+      await request;
       if (!scope.isCurrent()) {
         return;
       }
@@ -793,23 +801,13 @@ function WorkbenchBoundProjectApp({
         projectActivities.report({ kind: 'canvas-operation-failed', operation: 'reveal-path' });
       }
     }
-  }, [api, canonicalRoot, centerCanvasProjectionNode, projectActivities, projectPathCommandIntake]);
-  const getAcceptedProjectSnapshot = useCallback(() => {
-    const state = api.projectProjection.getState();
-    return state.status === 'unbound' ? undefined : state.snapshot;
-  }, []);
-  const [explorerFeatureRequested, setExplorerFeatureRequested] = useState(false);
-  const [explorerController, setExplorerController] = useState<ProjectExplorerController>();
-  const requestExplorerFeature = useCallback(() => {
-    setExplorerFeatureRequested(true);
-  }, []);
-  const fileClipboard = explorerController?.fileClipboard;
+  }, [api, canonicalRoot, centerCanvasProjectionNode, projectActivities, projectCommandGate]);
+  const fileClipboard = explorerController.fileClipboard;
   const canvasCutPaths = useMemo(() => (
     fileClipboard?.operation === 'cut'
       ? fileClipboard.entries.map((entry) => entry.projectRelativePath)
       : []
   ), [fileClipboard]);
-  const inlineProjectTreeEdit = explorerController?.inlineEdit;
 
   const notifyCanvasFeedbackUnavailable = useCallback((_message: string) => {
     projectActivities.report({
@@ -848,9 +846,13 @@ function WorkbenchBoundProjectApp({
       return;
     }
     setProjectOpenPresentation({});
-    const outcome = await projectBindingLifecycle.open({ projectRoot: canonicalRoot });
-    if (outcome.outcome === 'failed') {
-      setProjectOpenPresentation(projectOpenPresentationFromFailure(outcome.error, i18n));
+    try {
+      await projectBindingLifecycle.open({ projectRoot: canonicalRoot });
+    } catch (error) {
+      setProjectOpenPresentation(projectOpenPresentationFromFailure(
+        error instanceof Error ? error : new Error(String(error)),
+        i18n
+      ));
     }
   }, [canonicalRoot, i18n, projectBindingLifecycle, setProjectOpenPresentation]);
 
@@ -1061,15 +1063,6 @@ function WorkbenchBoundProjectApp({
     setProjectOpenPresentation(projectOpenPresentationFromFailure(failure, i18n, attemptedPath));
   }, [hasAcceptedProject, i18n, projectActivities, setProjectOpenPresentation]);
 
-  const presentProjectOpenOutcome = useCallback((
-    outcome: ProjectBindingLifecycleOutcome,
-    attemptedPath?: string
-  ) => {
-    if (outcome.outcome === 'failed') {
-      presentProjectOpenFailure(outcome.error, attemptedPath);
-    }
-  }, [presentProjectOpenFailure]);
-
   const openProject = useCallback<WorkbenchActions['openProject']>(async () => {
     const shell = getDebruteShellApi();
     if (shell) {
@@ -1089,34 +1082,40 @@ function WorkbenchBoundProjectApp({
         return;
       }
       setProjectOpenPresentation({ attemptedPath: projectRoot });
-      presentProjectOpenOutcome(await projectBindingLifecycle.open({ projectRoot }));
+      await projectBindingLifecycle.open({ projectRoot });
+      setProjectOpenPresentation({});
     } catch (error) {
       presentProjectOpenFailure(error instanceof Error ? error : new Error(String(error)));
     }
-  }, [api, presentProjectOpenFailure, presentProjectOpenOutcome, projectBindingLifecycle, setProjectOpenPresentation]);
+  }, [api, presentProjectOpenFailure, projectBindingLifecycle, setProjectOpenPresentation]);
 
-  const openProjectRoot = useCallback(async (projectRoot: string): Promise<ProjectBindingLifecycleOutcome> => {
+  const openProjectRoot = useCallback(async (projectRoot: string): Promise<void> => {
     setProjectOpenPresentation({ attemptedPath: projectRoot });
-    return projectBindingLifecycle.open({ projectRoot });
-  }, [projectBindingLifecycle, setProjectOpenPresentation]);
+    try {
+      await projectBindingLifecycle.open({ projectRoot });
+      setProjectOpenPresentation({});
+    } catch (error) {
+      presentProjectOpenFailure(
+        error instanceof Error ? error : new Error(String(error)),
+        projectRoot
+      );
+    }
+  }, [presentProjectOpenFailure, projectBindingLifecycle, setProjectOpenPresentation]);
 
   const openRecentProject = useCallback(async (projectRoot: string): Promise<void> => {
-    presentProjectOpenOutcome(await openProjectRoot(projectRoot), projectRoot);
-  }, [openProjectRoot, presentProjectOpenOutcome]);
+    await openProjectRoot(projectRoot);
+  }, [openProjectRoot]);
 
   useEffect(() => getDebruteShellApi()?.onNativeProjectOpenRequested((projectRoot) => {
-    void openProjectRoot(projectRoot).then((outcome) => {
-      presentProjectOpenOutcome(outcome, projectRoot);
-    });
-  }), [openProjectRoot, presentProjectOpenOutcome]);
+    void openProjectRoot(projectRoot);
+  }), [openProjectRoot]);
 
   const openWorkbenchContextMenu = useCallback((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => {
-    if (!projectPathCommandIntake.canAccept()) {
+    if (!projectCommandGate.available()) {
       return;
     }
-    requestExplorerFeature();
     setContextMenu({ target, position });
-  }, [projectPathCommandIntake, requestExplorerFeature]);
+  }, [projectCommandGate]);
 
   const closeWorkbenchContextMenu = useCallback(() => {
     setContextMenu(undefined);
@@ -1127,16 +1126,17 @@ function WorkbenchBoundProjectApp({
       return;
     }
     closeWorkbenchContextMenu();
-    explorerController?.cancelEdit();
-  }, [closeWorkbenchContextMenu, explorerController, isProjectOpening, projectPresentationBlocked]);
+    explorerController.cancelEdit();
+  }, [
+    closeWorkbenchContextMenu,
+    explorerController.cancelEdit,
+    isProjectOpening,
+    projectPresentationBlocked
+  ]);
 
   const openInspectorPanel = useCallback(() => {
     windowHostRef.current?.openPanel('inspector');
   }, []);
-  const publishExplorerInspectionSelection = useCallback((selection: ProjectTreeSelectionState) => {
-    inspectionTargetStore.publishPaths(selection.selectedPaths);
-  }, [inspectionTargetStore]);
-
   const effectiveTitleBarState = useMemo(() => buildWorkbenchTitleBarState({
     platform: productPlatform,
     host: getDebruteShellApi() ? 'desktop' : 'web',
@@ -1151,10 +1151,7 @@ function WorkbenchBoundProjectApp({
     if (panelId === 'settings') {
       requestSettingsFeature();
     }
-    if (panelId === 'explorer') {
-      requestExplorerFeature();
-    }
-  }, [requestExplorerFeature, requestSettingsFeature]);
+  }, [requestSettingsFeature]);
 
   const globalProjection = api.globalProjection.getState();
   if (globalProjection.status === 'uninitialized') {
@@ -1178,21 +1175,14 @@ function WorkbenchBoundProjectApp({
       ...(projectOpenError ? { error: projectOpenError } : {}),
       opening: isProjectOpening
     },
-    explorerSelection: explorerController?.selection ?? projectTreeSelectionFromPaths([]),
     photoshop: globalProjection.photoshop,
     canvasFeedback: feedbackInteraction.feedback,
     textFileBuffers,
     textEditorWindows,
   };
 
-  const openProjectPathTerminalPanel = useCallback((
-    scope: AcceptedProjectPathCommandScope,
-    cwdProjectRelativePath: string
-  ) => {
-    if (!scope.canSubmit()) {
-      return;
-    }
-    setRequestedTerminal({ cwdProjectRelativePath, scope });
+  const openProjectPathTerminalPanel = useCallback((cwdProjectRelativePath: string) => {
+    setRequestedTerminal({ cwdProjectRelativePath });
     windowHostRef.current?.openPanel('terminal');
   }, []);
 
@@ -1317,72 +1307,31 @@ function WorkbenchBoundProjectApp({
   const readyPhotoshop = globalProjection.photoshop.status === 'ready'
     ? globalProjection.photoshop.value
     : undefined;
-  const permanentDeleteConfirmationLabels = useMemo(() => ({
-    directory: (path: string) => i18n.t('shell.confirm.permanentDeleteDirectory', { path }),
-    file: (path: string) => i18n.t('shell.confirm.permanentDeleteFile', { path }),
-    selectedItems: (count: number) => i18n.t('shell.confirm.permanentDeleteSelected', { count })
-  }), [i18n]);
-  const confirmPermanentDelete = useCallback((input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }> }) => (
-    window.confirm(projectPathDeletionConfirmationMessageForEntries(input, permanentDeleteConfirmationLabels))
-  ), [permanentDeleteConfirmationLabels]);
-  const trashConfirmationLabels = useMemo(() => ({
-    directory: (path: string) => i18n.t('shell.confirm.trashDirectory', { path }),
-    file: (path: string) => i18n.t('shell.confirm.trashFile', { path }),
-    selectedItems: (count: number) => i18n.t('shell.confirm.trashSelected', { count })
-  }), [i18n]);
-  const confirmTrash = useCallback((input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }> }) => (
-    window.confirm(projectPathDeletionConfirmationMessageForEntries(input, trashConfirmationLabels))
-  ), [trashConfirmationLabels]);
-  const confirmMoveOverwrite = useCallback((input: {
-    entries: ProjectPathEntry[];
-    targetDirectoryProjectRelativePath: string;
-  }) => (
-    window.confirm(i18n.t('shell.confirm.moveOverwrite', {
-      target: input.targetDirectoryProjectRelativePath || i18n.t('shell.confirm.projectRoot')
-    }))
-  ), [i18n]);
-  const projectPathCommandRouter = useMemo(() => explorerController
-    ? createProjectPathCommandRouter({
-    commandIntake: projectPathCommandIntake,
-    commandEffects: projectPathCommandEffects,
+  const projectPathCommandRouter = useMemo(() => createProjectPathCommandRouter({
+    commandGate: projectCommandGate,
+    api,
+    projection: canvasProjection,
+    explorer: explorerController,
+    photoshop: readyPhotoshop,
+    activities: projectActivities,
+    closeContextMenu: closeWorkbenchContextMenu,
     openTerminalPanel: openProjectPathTerminalPanel,
-    menuContext: {
-      projection: canvasProjection,
-      fileClipboard,
-      photoshop: readyPhotoshop
+    revealInCanvas: (projectRelativePath) => {
+      void locateProjectFileInCanvas(projectRelativePath);
     },
-    commandContext: {
-      canvasProjection,
-      canvasRuntime,
-      fileClipboard,
-      revealInCanvas: (projectRelativePath) => {
-        void locateProjectFileInCanvas(projectRelativePath);
-      },
-      explorerCommands: explorerController,
-      activities: projectActivities,
-      closeContextMenu: closeWorkbenchContextMenu,
-      inspectEntries: (entries) => {
-        inspectionTargetStore.publishPaths(entries.map((entry) => entry.projectRelativePath));
-      },
-      openInspectorPanel,
-      confirmPermanentDelete,
-      confirmTrash,
-      getProjectSnapshot: getAcceptedProjectSnapshot,
-      resetCanvasNodeLayouts: (nodePaths) => (
-        resetCanvasNodeLayouts({ nodePaths })
-      ),
-      confirmMoveOverwrite,
-    }
-    })
-    : undefined, [
-    canvasRuntime,
+    inspectEntries: (entries) => {
+      inspectionTargetStore.publishPaths(entries.map((entry) => entry.projectRelativePath));
+    },
+    openInspectorPanel,
+    resetCanvasNodeLayouts: (nodePaths) => resetCanvasNodeLayouts({ nodePaths }),
+    confirmPermanentDelete,
+    confirmTrash
+  }), [
+    api,
     canvasProjection,
     closeWorkbenchContextMenu,
-    confirmMoveOverwrite,
     confirmTrash,
     confirmPermanentDelete,
-    fileClipboard,
-    getAcceptedProjectSnapshot,
     explorerController,
     locateProjectFileInCanvas,
     inspectionTargetStore,
@@ -1391,13 +1340,13 @@ function WorkbenchBoundProjectApp({
     openInspectorPanel,
     readyPhotoshop,
     resetCanvasNodeLayouts,
-    projectPathCommandEffects,
-    projectPathCommandIntake
+    projectCommandGate
   ]);
   const focusCommandRouter = useMemo(() => createWorkbenchFocusCommandRouter({
     getRuntime: () => canvasRuntime,
     getProjection: () => canvasProjection,
     getCanvasRoot: () => document.querySelector<HTMLElement>('[data-testid="canvas-surface"]'),
+    getExplorerRoot: () => document.querySelector<HTMLElement>('.project-tree'),
     getProjectPathRouter: () => projectPathCommandRouter,
     getExplorerController: () => explorerController
   }), [canvasRuntime, canvasProjection, explorerController, projectPathCommandRouter]);
@@ -1439,12 +1388,6 @@ function WorkbenchBoundProjectApp({
       executeDocumentEditCommand(commandId);
     });
   }, [focusCommandRouter]);
-  const handleProjectTreeKeyboardFileCommand = useCallback((command: ProjectTreeFileKeyboardCommand, target: WorkbenchContextMenuTarget) => {
-    projectPathCommandRouter?.run(command, {
-      target,
-      position: { x: 0, y: 0 }
-    });
-  }, [projectPathCommandRouter]);
   if (connectionEnded && !acceptedProject) {
     return (
       <I18nProvider locale={presentationController.locale}>
@@ -1559,7 +1502,6 @@ function WorkbenchBoundProjectApp({
       onVideoMetadata={handleCanvasVideoMetadata}
       textPreviewStyleDependencyKey={presentationController.resolvedTheme}
       runtimeScopeKey={canvasRuntimeScopeKey}
-      minimapOpen={canvasMinimapOpen}
       productPlatform={productPlatform}
       cutPaths={canvasCutPaths}
       feedbackInteraction={feedbackInteraction.canvas}
@@ -1592,19 +1534,6 @@ function WorkbenchBoundProjectApp({
 
   return (
     <>
-      {explorerFeatureRequested ? (
-        <React.Suspense fallback={null}>
-          <WorkbenchExplorerControllerHost
-            commandEffects={projectPathCommandEffects}
-            getSnapshot={getAcceptedProjectSnapshot}
-            canvasRuntime={canvasRuntime}
-            activities={projectActivities}
-            i18n={i18n}
-            onInspectionSelectionChange={publishExplorerInspectionSelection}
-            onController={setExplorerController}
-          />
-        </React.Suspense>
-      ) : null}
       <I18nProvider locale={presentationController.locale}>
       <WorkbenchIconProvider>
         <div
@@ -1737,52 +1666,30 @@ function WorkbenchBoundProjectApp({
             renderPanelBody={(panelId) => (
               <FloatingPanelContent
                     panelId={panelId}
-                    explorerPanel={explorerController ? (
+                    explorerPanel={snapshot ? (
                       <React.Suspense fallback={<div className="project-tree" aria-busy="true" />}>
-                        <WorkbenchExplorerPanelFeature
-                          key={runtimeBindingId}
-                          locale={presentationController.locale}
-                          state={state}
-                          fileClipboard={fileClipboard}
-                          inlineProjectTreeEdit={inlineProjectTreeEdit}
-                          onEditValueChange={explorerController.updateEditValue}
-                          onEditSubmit={() => {
-                            const scope = projectPathCommandIntake.tryAccept();
-                            if (scope) {
-                              void explorerController.submitEdit(scope);
-                            }
-                          }}
-                          onEditCancel={explorerController.cancelEdit}
-                          onClearCut={explorerController.clearCut}
-                          onExpandProjectDirectory={(projectRelativeDirectory) => {
-                            const scope = projectPathCommandIntake.tryAccept();
-                            if (scope) {
-                              explorerController.loadDirectory(scope, projectRelativeDirectory);
-                            }
-                          }}
-                          onExplorerSelectionChange={explorerController.setSelection}
-                          onLocateFileInCanvas={locateProjectFileInCanvas}
-                          onProjectTreeInternalDrop={(input) => {
-                            const scope = projectPathCommandIntake.tryAccept();
-                            if (scope) {
-                              explorerController.handleInternalDrop(scope, input);
-                            }
-                          }}
-                          onProjectTreeExternalDrop={(input) => {
-                            const scope = projectPathCommandIntake.tryAccept();
-                            if (scope) {
-                              explorerController.handleExternalDrop(scope, input);
-                            }
-                          }}
-                          onOpenContextMenu={openWorkbenchContextMenu}
-                          onCreateRootFile={() => {
-                            const scope = projectPathCommandIntake.tryAccept();
-                            if (scope) {
-                              explorerController.beginCreateFile(scope, '');
-                            }
-                          }}
+                        <ProjectTree
+                          key={projectProjection.generation}
+                          generation={projectProjection.generation}
+                          snapshot={snapshot}
+                          state={explorerController.state}
                           productPlatform={productPlatform}
-                          onKeyboardFileCommand={handleProjectTreeKeyboardFileCommand}
+                          onSelectionChange={explorerController.setSelection}
+                          onToggleDirectory={explorerController.toggleDirectory}
+                          onBeginRename={explorerController.beginRename}
+                          onBeginCreate={explorerController.beginCreate}
+                          onEditValueChange={explorerController.updateEditValue}
+                          onEditSubmit={() => { void explorerController.submitEdit(); }}
+                          onEditCancel={explorerController.cancelEdit}
+                          onInternalDrop={({ operation, entries, targetDirectoryProjectRelativePath }) => {
+                            explorerController.transfer(operation, entries, targetDirectoryProjectRelativePath);
+                          }}
+                          onExternalDrop={explorerController.externalDrop}
+                          onExternalDropError={() => {
+                            projectActivities.report({ kind: 'explorer-operation-failed', operation: 'import' });
+                          }}
+                          onLocateFileInCanvas={locateProjectFileInCanvas}
+                          onOpenContextMenu={openWorkbenchContextMenu}
                         />
                       </React.Suspense>
                     ) : <div className="project-tree" aria-busy="true" />}
@@ -1900,7 +1807,7 @@ export function ProjectPathContextMenuHost({
       items={items}
       position={contextMenu.position}
       productPlatform={productPlatform}
-      selectionCount={contextMenu.target.selectedEntries.length}
+      selectionCount={resolveProjectPathCommandTarget(contextMenu.target).length}
       onCommand={(command, photoshopTarget) => router.run(command, contextMenu, photoshopTarget)}
       onClose={onClose}
     />
@@ -1966,6 +1873,23 @@ function createInitialProjectPresentation(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function projectPathDeletionConfirmationMessageForEntries(
+  input: { entries: Array<{ projectRelativePath: string; kind: 'file' | 'directory' }> },
+  labels: {
+    directory(path: string): string;
+    file(path: string): string;
+    selectedItems(count: number): string;
+  }
+): string {
+  if (input.entries.length !== 1) {
+    return labels.selectedItems(input.entries.length);
+  }
+  const entry = input.entries[0]!;
+  return entry.kind === 'directory'
+    ? labels.directory(entry.projectRelativePath)
+    : labels.file(entry.projectRelativePath);
 }
 
 interface ProjectOpenPresentation {

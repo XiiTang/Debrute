@@ -27,11 +27,12 @@ use crate::project::{
     CANVAS_VIDEO_TIME_MAX_MS, CanvasMediaKind, CanvasStatePatch, CanvasTextPreviewSourceStatus,
     CanvasTextPreviewSourceTarget, CanvasVideoMetadata, CanvasVideoPreviewSourceStatus,
     CanvasVideoPreviewTarget, PreviewCancellation, ProjectCommand, ProjectCommandResult,
-    ProjectDirectoryPath, ProjectError, ProjectFileSourceTarget, ProjectPathClipboardFormat,
-    ProjectPathEntry, ProjectPathKind, ProjectRelativePath, ProjectRevisionResult, ProjectSession,
-    ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
-    admit_project_path_entries, canvas_media_kind_from_path, open_leased_project_file,
-    read_project_text_file, resolve_existing_project_path,
+    ProjectDirectoryPath, ProjectError, ProjectFileSourceTarget, ProjectPathBatchAttempt,
+    ProjectPathClipboardFormat, ProjectPathKind, ProjectPathRef, ProjectRelativePath,
+    ProjectRevisionResult, ProjectSession, ProjectUploadEntry, RevisionedFilePlan,
+    RevisionedFileResponse, UpdateCanvasFeedbackInput, admit_project_path_entries,
+    canvas_media_kind_from_path, open_leased_project_file, read_project_text_file,
+    resolve_existing_project_path,
 };
 
 use super::{
@@ -51,6 +52,32 @@ const VIDEO_PREVIEW_SOURCE_MULTIPART_LIMITS: MultipartLimits = MultipartLimits {
     fields_bytes: 64 * 1024,
     parts: 2,
 };
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProjectUploadImportPlan {
+    entries: Vec<ProjectUploadImportPlanEntry>,
+    target_directory_project_relative_path: String,
+    #[serde(default)]
+    overwrite: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum ProjectUploadImportPlanEntry {
+    Directory {
+        relative_path: String,
+    },
+    File {
+        relative_path: String,
+        file_field: String,
+    },
+}
 
 pub(super) async fn text_file(
     State(state): State<WorkbenchRouterState>,
@@ -312,25 +339,6 @@ pub(super) async fn import_uploads(
     Extension(scope): Extension<ProjectAuthorization>,
     request: Request,
 ) -> Response {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct Plan {
-        entries: Vec<PlanEntry>,
-        target_directory_project_relative_path: String,
-        #[serde(default)]
-        overwrite: bool,
-    }
-    #[derive(Deserialize)]
-    #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-    enum PlanEntry {
-        Directory {
-            project_relative_path: String,
-        },
-        File {
-            project_relative_path: String,
-            file_field: String,
-        },
-    }
     let parts = match read_multipart(request).await {
         Ok(parts) => parts,
         Err(error) => return service_error_response(error),
@@ -341,28 +349,31 @@ pub(super) async fn import_uploads(
     if parts.fields.len() != 1 {
         return invalid_input("Upload import accepts only the plan field.");
     }
-    let plan: Plan = match serde_json::from_str(plan) {
+    let plan: ProjectUploadImportPlan = match serde_json::from_str(plan) {
         Ok(plan) => plan,
         Err(error) => return invalid_input(error.to_string()),
     };
+    let target_directory =
+        match ProjectDirectoryPath::parse(&plan.target_directory_project_relative_path) {
+            Ok(target) => target,
+            Err(error) => return project_error(error),
+        };
     let mut referenced_files = std::collections::HashSet::new();
     let mut entries = Vec::with_capacity(plan.entries.len());
     for entry in plan.entries {
         match entry {
-            PlanEntry::Directory {
-                project_relative_path,
-            } => {
-                let project_relative_path = match ProjectRelativePath::parse(&project_relative_path)
-                {
-                    Ok(path) => path,
-                    Err(error) => return project_error(error),
-                };
+            ProjectUploadImportPlanEntry::Directory { relative_path } => {
+                let project_relative_path =
+                    match project_upload_target(&target_directory, &relative_path) {
+                        Ok(path) => path,
+                        Err(error) => return project_error(error),
+                    };
                 entries.push(ProjectUploadEntry::Directory {
                     project_relative_path,
                 });
             }
-            PlanEntry::File {
-                project_relative_path,
+            ProjectUploadImportPlanEntry::File {
+                relative_path,
                 file_field,
             } => {
                 let Some(file) = parts.files.get(&file_field) else {
@@ -371,11 +382,11 @@ pub(super) async fn import_uploads(
                 if !referenced_files.insert(file_field.clone()) {
                     return invalid_input(format!("Upload file field is reused: {file_field}"));
                 }
-                let project_relative_path = match ProjectRelativePath::parse(&project_relative_path)
-                {
-                    Ok(path) => path,
-                    Err(error) => return project_error(error),
-                };
+                let project_relative_path =
+                    match project_upload_target(&target_directory, &relative_path) {
+                        Ok(path) => path,
+                        Err(error) => return project_error(error),
+                    };
                 entries.push(ProjectUploadEntry::TemporaryFile {
                     project_relative_path,
                     temporary_path: file.temporary_path.clone(),
@@ -386,11 +397,6 @@ pub(super) async fn import_uploads(
     if referenced_files.len() != parts.files.len() {
         return invalid_input("Upload request contains an undeclared file field.");
     }
-    let target_directory =
-        match ProjectDirectoryPath::parse(&plan.target_directory_project_relative_path) {
-            Ok(target) => target,
-            Err(error) => return project_error(error),
-        };
     command_for_scope(
         &state,
         &scope,
@@ -400,6 +406,19 @@ pub(super) async fn import_uploads(
             overwrite: plan.overwrite,
         },
     )
+}
+
+fn project_upload_target(
+    target_directory: &ProjectDirectoryPath,
+    relative_path: &str,
+) -> Result<ProjectRelativePath, ProjectError> {
+    let relative = ProjectRelativePath::parse(relative_path)?;
+    let target = if target_directory.is_root() {
+        relative.as_str().to_owned()
+    } else {
+        format!("{target_directory}/{relative}")
+    };
+    ProjectRelativePath::parse(&target)
 }
 
 pub(super) async fn batch_copy(
@@ -490,7 +509,7 @@ pub(super) async fn copy_paths_to_system_clipboard(
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Input {
         format: Format,
-        entries: Vec<ProjectPathEntry>,
+        entries: Vec<ProjectPathRef>,
     }
     let input: Input = match json_body(request).await {
         Ok(input) => input,
@@ -595,10 +614,9 @@ async fn reveal_path(
     };
     match runtime.native_shell().reveal(
         session.root(),
-        &ProjectPathEntry {
+        &ProjectPathRef {
             project_relative_path: path.to_owned(),
             kind: input.kind,
-            size_bytes: None,
         },
     ) {
         Ok(()) => Json(json!({"ok": true})).into_response(),
@@ -1302,6 +1320,12 @@ fn command_response_body(result: ProjectCommandResult) -> Result<Value, RuntimeH
         ProjectCommandResult::PathChanged { result, .. } => serde_json::to_value(result)
             .map_err(|error| RuntimeHttpServiceError::serialization(&error))?,
         ProjectCommandResult::PathsChanged { results, .. } => json!({"results": results}),
+        ProjectCommandResult::PathsAttempted { attempt, .. } => match attempt {
+            ProjectPathBatchAttempt::Applied(results) => {
+                json!({"outcome": "applied", "results": results})
+            }
+            ProjectPathBatchAttempt::Conflict => json!({"outcome": "conflict"}),
+        },
     })
 }
 
@@ -1318,13 +1342,13 @@ fn project_session(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PathBatchInput {
-    entries: Vec<ProjectPathEntry>,
+    entries: Vec<ProjectPathRef>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PathBatchTargetInput {
-    entries: Vec<ProjectPathEntry>,
+    entries: Vec<ProjectPathRef>,
     target_directory_project_relative_path: String,
     #[serde(default)]
     overwrite: bool,
@@ -1564,6 +1588,77 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn upload_relative_paths_are_joined_and_validated_only_by_runtime() {
+        let target = ProjectDirectoryPath::parse("assets/imported").unwrap();
+        assert_eq!(
+            project_upload_target(&target, "folder/片段.png")
+                .unwrap()
+                .as_str(),
+            "assets/imported/folder/片段.png"
+        );
+        assert!(project_upload_target(&target, "../outside.png").is_err());
+        assert!(project_upload_target(&target, "/absolute.png").is_err());
+    }
+
+    #[test]
+    fn upload_import_plan_accepts_the_camel_case_protocol_fields() {
+        let plan: ProjectUploadImportPlan = serde_json::from_value(serde_json::json!({
+            "entries": [
+                { "kind": "directory", "relativePath": "folder" },
+                {
+                    "kind": "file",
+                    "relativePath": "folder/clip.png",
+                    "fileField": "file:1"
+                }
+            ],
+            "targetDirectoryProjectRelativePath": "assets",
+            "overwrite": true
+        }))
+        .unwrap();
+
+        assert_eq!(plan.target_directory_project_relative_path, "assets");
+        assert!(plan.overwrite);
+        assert!(matches!(
+            &plan.entries[0],
+            ProjectUploadImportPlanEntry::Directory { relative_path }
+                if relative_path == "folder"
+        ));
+        assert!(matches!(
+            &plan.entries[1],
+            ProjectUploadImportPlanEntry::File {
+                relative_path,
+                file_field
+            } if relative_path == "folder/clip.png" && file_field == "file:1"
+        ));
+    }
+
+    #[test]
+    fn upload_import_plan_rejects_legacy_or_rust_field_spellings() {
+        assert!(
+            serde_json::from_value::<ProjectUploadImportPlan>(serde_json::json!({
+                "entries": [{
+                    "kind": "file",
+                    "relative_path": "clip.png",
+                    "file_field": "file:1"
+                }],
+                "targetDirectoryProjectRelativePath": "assets"
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ProjectUploadImportPlan>(serde_json::json!({
+                "entries": [{
+                    "kind": "file",
+                    "projectRelativePath": "assets/clip.png",
+                    "fileField": "file:1"
+                }],
+                "targetDirectoryProjectRelativePath": "assets"
+            }))
+            .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn dropping_a_preview_request_cancels_its_blocking_worker() {

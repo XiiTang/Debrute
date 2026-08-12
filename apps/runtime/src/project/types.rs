@@ -21,6 +21,13 @@ pub enum ProjectPathKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectPathRef {
+    pub project_relative_path: String,
+    pub kind: ProjectPathKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectPathEntry {
     pub project_relative_path: String,
     pub kind: ProjectPathKind,
@@ -466,18 +473,105 @@ pub struct ProjectEvent {
     pub change: ProjectChange,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ProjectPathOperationStatus {
-    Ok,
-    Skipped,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ProjectPathBatchItemResult {
+    Ok {
+        source_project_relative_path: String,
+        project_relative_path: String,
+        kind: ProjectPathKind,
+    },
+    Skipped {
+        source_project_relative_path: String,
+        project_relative_path: String,
+        kind: ProjectPathKind,
+    },
+    Failed {
+        source_project_relative_path: String,
+        project_relative_path: String,
+        kind: ProjectPathKind,
+        error: String,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectPathBatchItemResult {
-    pub source_project_relative_path: String,
-    pub project_relative_path: String,
-    pub kind: ProjectPathKind,
-    pub status: ProjectPathOperationStatus,
+impl ProjectPathBatchItemResult {
+    #[must_use]
+    pub fn ok(source: String, target: String, kind: ProjectPathKind) -> Self {
+        Self::Ok {
+            source_project_relative_path: source,
+            project_relative_path: target,
+            kind,
+        }
+    }
+
+    #[must_use]
+    pub fn skipped(path: String, kind: ProjectPathKind) -> Self {
+        Self::Skipped {
+            source_project_relative_path: path.clone(),
+            project_relative_path: path,
+            kind,
+        }
+    }
+
+    #[must_use]
+    pub fn failed(path: String, kind: ProjectPathKind, error: String) -> Self {
+        Self::Failed {
+            source_project_relative_path: path.clone(),
+            project_relative_path: path,
+            kind,
+            error,
+        }
+    }
+
+    #[must_use]
+    pub fn is_ok(&self) -> bool {
+        matches!(self, Self::Ok { .. })
+    }
+
+    #[must_use]
+    pub fn source_project_relative_path(&self) -> &str {
+        match self {
+            Self::Ok {
+                source_project_relative_path,
+                ..
+            }
+            | Self::Skipped {
+                source_project_relative_path,
+                ..
+            }
+            | Self::Failed {
+                source_project_relative_path,
+                ..
+            } => source_project_relative_path,
+        }
+    }
+
+    #[must_use]
+    pub fn project_relative_path(&self) -> &str {
+        match self {
+            Self::Ok {
+                project_relative_path,
+                ..
+            }
+            | Self::Skipped {
+                project_relative_path,
+                ..
+            }
+            | Self::Failed {
+                project_relative_path,
+                ..
+            } => project_relative_path,
+        }
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> ProjectPathKind {
+        match self {
+            Self::Ok { kind, .. } | Self::Skipped { kind, .. } | Self::Failed { kind, .. } => *kind,
+        }
+    }
 }

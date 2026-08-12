@@ -1,70 +1,56 @@
 import type { DebruteShellApi } from '../../api/shellApi';
 
-export type ProjectTreeExternalUploadEntry =
+export type ProjectExternalDropSource =
+  | { kind: 'local-paths'; sourcePaths: string[] }
   | {
-      kind: 'directory';
-      projectRelativePath: string;
-    }
-  | {
-      kind: 'file';
-      file: File;
-      projectRelativePath: string;
+      kind: 'uploads';
+      entries: ProjectExternalDropUploadEntry[];
     };
 
-export interface ProjectTreeExternalDropPlan {
-  localPaths: string[];
-  uploads: ProjectTreeExternalUploadEntry[];
-  targetDirectoryProjectRelativePath: string;
-}
+export type ProjectExternalDropUploadEntry =
+  | { kind: 'directory'; relativePath: string }
+  | { kind: 'file'; relativePath: string; file: File };
 
 export function hasProjectTreeExternalDrag(dataTransfer: DataTransfer): boolean {
   return dataTransfer.files.length > 0 || Array.from(dataTransfer.types).includes('Files');
 }
 
-export async function createProjectTreeExternalDropPlan(input: {
+export async function createProjectExternalDropSource(input: {
   dataTransfer: DataTransfer;
   shell: DebruteShellApi | undefined;
-  targetDirectoryProjectRelativePath: string;
-}): Promise<ProjectTreeExternalDropPlan> {
+}): Promise<ProjectExternalDropSource> {
   const files = Array.from(input.dataTransfer.files);
-  const electronLocalPaths = electronLocalDropPaths(files, input.shell);
-  if (electronLocalPaths) {
-    return {
-      localPaths: electronLocalPaths,
-      uploads: [],
-      targetDirectoryProjectRelativePath: normalizeExternalDropPath(input.targetDirectoryProjectRelativePath)
-    };
+  const localPaths = electronLocalDropPaths(files, input.shell);
+  if (localPaths) {
+    return { kind: 'local-paths', sourcePaths: localPaths };
   }
 
-  const entryUploads = await browserEntryUploadEntries(input.dataTransfer, input.targetDirectoryProjectRelativePath);
+  const entryUploads = await browserEntryUploadEntries(input.dataTransfer);
   if (entryUploads.length > 0) {
-    return {
-      localPaths: [],
-      uploads: entryUploads,
-      targetDirectoryProjectRelativePath: normalizeExternalDropPath(input.targetDirectoryProjectRelativePath)
-    };
+    return { kind: 'uploads', entries: entryUploads };
   }
 
   return {
-    localPaths: [],
-    uploads: files.map((file) => ({
+    kind: 'uploads',
+    entries: files.map((file) => ({
       kind: 'file',
       file,
-      projectRelativePath: joinExternalDropPath(
-        input.targetDirectoryProjectRelativePath,
-        browserFileProjectRelativePath(file)
-      )
-    })),
-    targetDirectoryProjectRelativePath: normalizeExternalDropPath(input.targetDirectoryProjectRelativePath)
+      relativePath: browserFileRelativePath(file)
+    }))
   };
 }
 
-function electronLocalDropPaths(files: File[], shell: DebruteShellApi | undefined): string[] | undefined {
+function electronLocalDropPaths(
+  files: File[],
+  shell: DebruteShellApi | undefined
+): string[] | undefined {
   if (!shell || files.length === 0) {
     return undefined;
   }
   const paths = files.map((file) => shell.getDroppedFilePath(file));
-  const resolvedPaths = paths.filter((path): path is string => typeof path === 'string' && path.length > 0);
+  const resolvedPaths = paths.filter(
+    (path): path is string => typeof path === 'string' && path.length > 0
+  );
   if (resolvedPaths.length === 0) {
     return undefined;
   }
@@ -91,9 +77,8 @@ interface BrowserFileSystemDirectoryEntry extends BrowserFileSystemEntry {
 }
 
 async function browserEntryUploadEntries(
-  dataTransfer: DataTransfer,
-  targetDirectoryProjectRelativePath: string
-): Promise<ProjectTreeExternalUploadEntry[]> {
+  dataTransfer: DataTransfer
+): Promise<ProjectExternalDropUploadEntry[]> {
   const items = Array.from(dataTransfer.items).filter((item) => item.kind === 'file');
   const entries: BrowserFileSystemEntry[] = [];
   for (const item of items) {
@@ -106,9 +91,9 @@ async function browserEntryUploadEntries(
     throw new Error('Browser external drop did not expose every dropped file entry.');
   }
 
-  const uploads: ProjectTreeExternalUploadEntry[] = [];
+  const uploads: ProjectExternalDropUploadEntry[] = [];
   for (const entry of entries) {
-    uploads.push(...await uploadEntriesFromBrowserEntry(entry, targetDirectoryProjectRelativePath));
+    uploads.push(...await uploadEntriesFromBrowserEntry(entry, ''));
   }
   return uploads;
 }
@@ -121,27 +106,25 @@ function browserEntryFromDataTransferItem(item: DataTransferItem): BrowserFileSy
 
 async function uploadEntriesFromBrowserEntry(
   entry: BrowserFileSystemEntry,
-  parentProjectRelativePath: string
-): Promise<ProjectTreeExternalUploadEntry[]> {
+  parentRelativePath: string
+): Promise<ProjectExternalDropUploadEntry[]> {
+  const relativePath = parentRelativePath ? `${parentRelativePath}/${entry.name}` : entry.name;
   if (entry.isFile) {
-    const file = await fileFromBrowserEntry(entry as BrowserFileSystemFileEntry);
     return [{
       kind: 'file',
-      file,
-      projectRelativePath: joinExternalDropPath(parentProjectRelativePath, entry.name)
+      file: await fileFromBrowserEntry(entry as BrowserFileSystemFileEntry),
+      relativePath
     }];
   }
   if (!entry.isDirectory) {
     return [];
   }
-  const directoryPath = joinExternalDropPath(parentProjectRelativePath, entry.name);
-  const entries = await entriesFromBrowserDirectoryEntry(entry as BrowserFileSystemDirectoryEntry);
-  const uploads: ProjectTreeExternalUploadEntry[] = [{
-    kind: 'directory',
-    projectRelativePath: directoryPath
-  }];
-  for (const child of entries) {
-    uploads.push(...await uploadEntriesFromBrowserEntry(child, directoryPath));
+  const uploads: ProjectExternalDropUploadEntry[] = [{ kind: 'directory', relativePath }];
+  const children = await entriesFromBrowserDirectoryEntry(
+    entry as BrowserFileSystemDirectoryEntry
+  );
+  for (const child of children) {
+    uploads.push(...await uploadEntriesFromBrowserEntry(child, relativePath));
   }
   return uploads;
 }
@@ -150,7 +133,9 @@ function fileFromBrowserEntry(entry: BrowserFileSystemFileEntry): Promise<File> 
   return new Promise((resolve) => entry.file(resolve));
 }
 
-function entriesFromBrowserDirectoryEntry(entry: BrowserFileSystemDirectoryEntry): Promise<BrowserFileSystemEntry[]> {
+function entriesFromBrowserDirectoryEntry(
+  entry: BrowserFileSystemDirectoryEntry
+): Promise<BrowserFileSystemEntry[]> {
   const reader = entry.createReader();
   const entries: BrowserFileSystemEntry[] = [];
   return new Promise((resolve) => {
@@ -168,17 +153,6 @@ function entriesFromBrowserDirectoryEntry(entry: BrowserFileSystemDirectoryEntry
   });
 }
 
-function browserFileProjectRelativePath(file: File): string {
-  const webkitRelativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
-  return normalizeExternalDropPath(webkitRelativePath || file.name);
-}
-
-function joinExternalDropPath(parentPath: string, childPath: string): string {
-  const parent = normalizeExternalDropPath(parentPath);
-  const child = normalizeExternalDropPath(childPath);
-  return parent ? `${parent}/${child}` : child;
-}
-
-function normalizeExternalDropPath(projectRelativePath: string): string {
-  return projectRelativePath.split('/').filter(Boolean).join('/');
+function browserFileRelativePath(file: File): string {
+  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
 }

@@ -53,9 +53,12 @@ export type ProjectTextLanguageId = typeof PROJECT_TEXT_LANGUAGE_IDS[number];
 
 export type ProjectPathKind = 'file' | 'directory';
 
-export interface ProjectPathEntry {
+export interface ProjectPathRef {
   projectRelativePath: string;
   kind: ProjectPathKind;
+}
+
+export interface ProjectPathEntry extends ProjectPathRef {
   sizeBytes?: number;
 }
 
@@ -95,10 +98,16 @@ export interface NormalizedFileWatchEvent {
   >;
 }
 
-export interface ProjectPathBatchItemResult extends ProjectPathEntry {
-  sourceProjectRelativePath: string;
-  status: 'ok' | 'skipped';
-}
+export type ProjectPathBatchItemResult =
+  | (ProjectPathRef & {
+      status: 'ok' | 'skipped';
+      sourceProjectRelativePath: string;
+    })
+  | (ProjectPathRef & {
+      status: 'failed';
+      sourceProjectRelativePath: string;
+      error: string;
+    });
 
 export interface ProjectPathBatchOperationResult {
   results: ProjectPathBatchItemResult[];

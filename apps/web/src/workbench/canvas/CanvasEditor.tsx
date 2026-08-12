@@ -28,7 +28,6 @@ export function CanvasEditor({
   onVideoMetadata,
   textPreviewStyleDependencyKey,
   runtimeScopeKey,
-  minimapOpen,
   productPlatform,
   cutPaths,
   feedbackInteraction,
@@ -54,7 +53,6 @@ export function CanvasEditor({
   onVideoMetadata?: ((update: CanvasVideoMetadataUpdate) => void) | undefined;
   textPreviewStyleDependencyKey: string;
   runtimeScopeKey?: number;
-  minimapOpen?: boolean | undefined;
   productPlatform: DebruteProductPlatform;
   cutPaths?: readonly string[] | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
@@ -97,7 +95,6 @@ export function CanvasEditor({
       onVideoMetadata={onVideoMetadata}
       textPreviewStyleDependencyKey={textPreviewStyleDependencyKey}
       runtimeScopeKey={runtimeScopeKey}
-      minimapOpen={minimapOpen}
       productPlatform={productPlatform}
       cutPaths={cutPaths}
       feedbackInteraction={feedbackInteraction}
@@ -118,7 +115,6 @@ interface CanvasSceneProps {
   onVideoMetadata?: ((update: CanvasVideoMetadataUpdate) => void) | undefined;
   textPreviewStyleDependencyKey: string;
   runtimeScopeKey?: number | undefined;
-  minimapOpen?: boolean | undefined;
   productPlatform: DebruteProductPlatform;
   cutPaths?: readonly string[] | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
@@ -137,7 +133,6 @@ const CanvasScene = React.memo(function CanvasScene({
   onVideoMetadata,
   textPreviewStyleDependencyKey,
   runtimeScopeKey,
-  minimapOpen,
   productPlatform,
   cutPaths,
   feedbackInteraction,
@@ -192,7 +187,6 @@ const CanvasScene = React.memo(function CanvasScene({
         canvasFeedback={canvasFeedback}
         onVideoMetadata={onVideoMetadata}
         feedbackInteraction={feedbackInteraction}
-        minimapOpen={minimapOpen}
         productPlatform={productPlatform}
         cutPaths={cutPaths}
         onOpenContextMenu={onOpenContextMenu}

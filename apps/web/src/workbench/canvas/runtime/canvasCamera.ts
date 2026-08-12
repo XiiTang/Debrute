@@ -9,6 +9,12 @@ export interface CanvasCamera {
 
 export type CanvasCameraState = 'idle' | 'moving';
 
+export type CanvasCameraChangeOrigin =
+  | 'pan'
+  | 'zoom'
+  | 'minimap'
+  | 'programmatic';
+
 export const DEFAULT_CANVAS_CAMERA: CanvasCamera = { x: 0, y: 0, z: 1 };
 export const MIN_CANVAS_CAMERA_Z = 0.01;
 export const MAX_CANVAS_CAMERA_Z = 9.99;

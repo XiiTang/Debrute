@@ -1,440 +1,148 @@
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
-import type { WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
-import type { WorkbenchContextMenuTarget } from '../shell/contextMenu';
-import {
-  handleProjectTreeKeyboardEvent,
-  handleProjectTreeRootContextMenuEvent,
-  isRootBlankAreaEventTarget,
-  projectTreeRowClickAction,
-  newlyExpandedProjectTreePaths,
-  ProjectTree
-} from './ProjectTree';
-import { flattenProjectTree, type ProjectTreeSelectionState } from './projectTreeInteraction';
-import { buildProjectFileTree } from './projectFileTree';
-import type { ProjectTreeFileKeyboardCommand } from './projectTreeKeyboardCommands';
+import { describe, expect, it } from 'vitest';
+import type { ProjectTreeEntry, WorkbenchProjectSessionSnapshot } from '@debrute/app-protocol';
 import { I18nProvider } from '../i18n';
+import {
+  PROJECT_TREE_ROW_HEIGHT,
+  ProjectTree,
+  projectExplorerRows,
+  projectTreeViewportRange
+} from './ProjectTree';
+import type { ProjectExplorerViewState } from './useProjectExplorerController';
 
 function renderStaticWithI18n(element: ReactElement): string {
-  return renderToStaticMarkup(
-    <I18nProvider locale="en">
-      {element}
-    </I18nProvider>
-  );
+  return renderToStaticMarkup(<I18nProvider locale="en">{element}</I18nProvider>);
 }
 
 describe('ProjectTree', () => {
-  it('requests only directories that transition to expanded', () => {
-    expect(newlyExpandedProjectTreePaths(
-      new Set(['assets']),
-      new Set(['assets', 'briefs', 'src'])
-    )).toEqual(['briefs', 'src']);
-  });
-  it('renders selected project files', () => {
-    const html = renderStaticWithI18n(
-      <ProjectTree
-        productPlatform="win32"
-        snapshot={{
-          projectTree: [
-            { kind: 'file', projectRelativePath: 'briefs/concept.md' },
-            { kind: 'file', projectRelativePath: 'assets/cover.png' },
-            { kind: 'file', projectRelativePath: 'archive.bin' }
-          ]
-        } as unknown as WorkbenchProjectSessionSnapshot}
-        selection={selection(['briefs/concept.md'])}
-        cutPaths={[]}
-        onSelectionChange={() => undefined}
-      />
-    );
-
-    expect(html).toContain('concept.md');
-    expect(html).toContain('aria-selected="true"');
-    expect(html).toContain('db-tree-row');
-  });
-
-  it('activates directories on a plain click without requiring a prior selection', () => {
-    expect(projectTreeRowClickAction({
-      kind: 'directory',
-      platform: 'win32',
-      event: {}
-    })).toEqual({
-      toggleDirectory: true,
-      locateFileInCanvas: false
-    });
-  });
-
-  it('keeps modified directory clicks available for selection without expanding', () => {
-    expect(projectTreeRowClickAction({
-      kind: 'directory',
-      platform: 'win32',
-      event: { ctrlKey: true }
-    })).toEqual({
-      toggleDirectory: false,
-      locateFileInCanvas: false
-    });
-  });
-
-  it('keeps a plain file click scoped to Explorer selection', () => {
-    expect(projectTreeRowClickAction({
-      kind: 'file',
-      platform: 'darwin',
-      event: {}
-    })).toEqual({
-      toggleDirectory: false,
-      locateFileInCanvas: false
-    });
-  });
-
-  it('renders the empty Project Tree state through shared UI classes', () => {
-    const html = renderStaticWithI18n(
-      <ProjectTree
-        productPlatform="win32"
-        snapshot={{ projectTree: [] } as unknown as WorkbenchProjectSessionSnapshot}
-        selection={selection([])}
-        cutPaths={[]}
-        onSelectionChange={() => undefined}
-      />
-    );
-
-    expect(html).toContain('db-empty-state');
-    expect(html).toContain('No project files');
-  });
-
-  it('renders known binary files as project tree rows', () => {
-    const html = renderStaticWithI18n(
-      <ProjectTree
-        productPlatform="win32"
-        snapshot={{
-          projectTree: [
-            { kind: 'file', projectRelativePath: 'archive.bin' }
-          ]
-        } as unknown as WorkbenchProjectSessionSnapshot}
-        selection={selection(['archive.bin'])}
-        cutPaths={[]}
-        onSelectionChange={() => undefined}
-      />
-    );
-
-    expect(html).toContain('archive.bin');
-  });
-
-  it('marks file and directory rows as context menu targets', () => {
-    const html = renderStaticWithI18n(
-      <ProjectTree
-        productPlatform="win32"
-        snapshot={{
-          projectTree: [
-            { kind: 'file', projectRelativePath: 'briefs/concept.md' },
-            { kind: 'file', projectRelativePath: 'assets/cover.png' }
-          ]
-        } as unknown as WorkbenchProjectSessionSnapshot}
-        selection={selection(['assets/cover.png', 'briefs/concept.md'])}
-        cutPaths={[]}
-        onSelectionChange={() => undefined}
-      />
-    );
-
-    expect(html).toContain('data-project-tree-context-path="briefs"');
-    expect(html).toContain('data-project-tree-context-path="briefs/concept.md"');
-    expect(html).toContain('data-project-tree-context-path="assets"');
-    expect(html).toContain('data-project-tree-context-path="assets/cover.png"');
-  });
-
-  it('renders cut rows and inline edit rows', () => {
-    const html = renderStaticWithI18n(
-      <ProjectTree
-        productPlatform="win32"
-        snapshot={{
-          projectTree: [
-            { kind: 'file', projectRelativePath: 'assets/cover.png' },
-            { kind: 'file', projectRelativePath: 'assets/page.png' }
-          ]
-        } as unknown as WorkbenchProjectSessionSnapshot}
-        selection={selection(['assets/cover.png'])}
-        cutPaths={['assets/page.png']}
-        editing={{
-          kind: 'creating-file',
-          parentProjectRelativePath: 'assets',
-          value: 'new.md'
-        }}
-        onSelectionChange={() => undefined}
-      />
-    );
-
-    expect(html).toContain('project-tree-row cut');
-    expect(html).toContain('data-project-tree-edit-kind="creating-file"');
-    expect(html).toContain('class="project-tree-edit-row"');
-    expect(html).toContain('value="new.md"');
-  });
-
-  it('dispatches keyboard file commands to the selected Project Tree target', () => {
-    const commands: Array<{ command: ProjectTreeFileKeyboardCommand; target: WorkbenchContextMenuTarget }> = [];
-    const event = keyboardEvent({ key: 'Delete' });
-
-    handleProjectTreeKeyboardEvent({
-      event,
-      editing: undefined,
-      selection: selection(['assets/cover.png']),
-      visibleItems: flattenProjectTree(buildProjectFileTree([
-        { kind: 'file', projectRelativePath: 'assets/cover.png' }
-      ]), new Set(['assets'])),
-      productPlatform: 'win32',
-      onKeyboardFileCommand: (command, target) => commands.push({ command, target })
-    });
-
-    expect(commands).toEqual([{
-      command: 'delete',
-      target: {
-        source: 'explorer',
-        invocationEntry: { pathEntry: { projectRelativePath: 'assets/cover.png', kind: 'file' } },
-        selectedEntries: [{ pathEntry: { projectRelativePath: 'assets/cover.png', kind: 'file' } }]
-      }
-    }]);
-    expect(event.preventDefault).toHaveBeenCalledTimes(1);
-    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
-  });
-
-  it('uses the focused item to resolve keyboard paste targets for multi-selection', () => {
-    const commands: Array<{ command: ProjectTreeFileKeyboardCommand; target: WorkbenchContextMenuTarget }> = [];
-    const event = keyboardEvent({ key: 'v', ctrlKey: true });
-
-    handleProjectTreeKeyboardEvent({
-      event,
-      editing: undefined,
-      selection: {
-        selectedPaths: ['assets', 'briefs/concept.md'],
-        focusedPath: 'briefs/concept.md',
-        anchorPath: 'assets'
-      },
-      visibleItems: flattenProjectTree(buildProjectFileTree([
-        { kind: 'file', projectRelativePath: 'assets/cover.png' },
-        { kind: 'file', projectRelativePath: 'briefs/concept.md' }
-      ]), new Set(['assets', 'briefs'])),
-      productPlatform: 'win32',
-      onKeyboardFileCommand: (command, target) => commands.push({ command, target })
-    });
-
-    expect(commands).toEqual([{
-      command: 'paste',
-      target: {
-        source: 'explorer',
-        invocationEntry: { pathEntry: { projectRelativePath: 'briefs/concept.md', kind: 'file' } },
-        selectedEntries: [
-          { pathEntry: { projectRelativePath: 'assets', kind: 'directory' } },
-          { pathEntry: { projectRelativePath: 'briefs/concept.md', kind: 'file' } }
-        ]
-      }
-    }]);
-  });
-
-  it('treats the empty Project Tree placeholder as blank root space', () => {
-    const emptyLine = {
-      closest: vi.fn((selector: string) => selector === '[data-project-tree-empty-line]' ? emptyLine : null)
-    };
-    const root = {};
-
-    expect(isRootBlankAreaEventTarget({
-      target: emptyLine,
-      currentTarget: root
-    })).toBe(true);
-  });
-
-  it('opens the root context menu from Project Tree blank space', () => {
-    const root = {};
-    const preventDefault = vi.fn();
-    const selections: ProjectTreeSelectionState[] = [];
-    const onOpenContextMenu = vi.fn();
-
-    expect(handleProjectTreeRootContextMenuEvent({
-      event: {
-        target: root,
-        currentTarget: root,
-        clientX: 12,
-        clientY: 34,
-        preventDefault
-      },
-      onSelectionChange: (next) => selections.push(next),
-      onOpenContextMenu
-    })).toBe(true);
-
-    expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(selections).toEqual([selection([])]);
-    expect(onOpenContextMenu).toHaveBeenCalledWith({
-      source: 'explorer',
-      invocationEntry: { pathEntry: { projectRelativePath: '', kind: 'directory' } },
-      selectedEntries: []
-    }, {
-      x: 12,
-      y: 34
-    });
-  });
-
-  it('ignores item keyboard commands when the Project Tree selection is empty', () => {
-    const commands: Array<{ command: ProjectTreeFileKeyboardCommand; target: WorkbenchContextMenuTarget }> = [];
-    const event = keyboardEvent({ key: 'c', ctrlKey: true });
-
-    handleProjectTreeKeyboardEvent({
-      event,
-      editing: undefined,
-      selection: selection([]),
-      visibleItems: flattenProjectTree(buildProjectFileTree([
-        { kind: 'file', projectRelativePath: 'assets/cover.png' }
-      ]), new Set(['assets'])),
-      productPlatform: 'win32',
-      onKeyboardFileCommand: (command, target) => commands.push({ command, target })
-    });
-
-    expect(commands).toEqual([]);
-    expect(event.preventDefault).not.toHaveBeenCalled();
-    expect(event.stopPropagation).not.toHaveBeenCalled();
-  });
-
-  it('keeps keyboard paste available for the Project Tree root when selection is empty', () => {
-    const commands: Array<{ command: ProjectTreeFileKeyboardCommand; target: WorkbenchContextMenuTarget }> = [];
-    const event = keyboardEvent({ key: 'v', ctrlKey: true });
-
-    handleProjectTreeKeyboardEvent({
-      event,
-      editing: undefined,
-      selection: selection([]),
-      visibleItems: flattenProjectTree(buildProjectFileTree([
-        { kind: 'file', projectRelativePath: 'assets/cover.png' }
-      ]), new Set(['assets'])),
-      productPlatform: 'win32',
-      onKeyboardFileCommand: (command, target) => commands.push({ command, target })
-    });
-
-    expect(commands).toEqual([{
-      command: 'paste',
-      target: {
-        source: 'explorer',
-        invocationEntry: { pathEntry: { projectRelativePath: '', kind: 'directory' } },
-        selectedEntries: []
-      }
-    }]);
-    expect(event.preventDefault).toHaveBeenCalledTimes(1);
-    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not handle bubbled row drag events as root drops', () => {
-    const row = {
-      closest: vi.fn(() => null)
-    };
-    const root = {};
-
-    expect(isRootBlankAreaEventTarget({
-      target: row,
-      currentTarget: root
-    })).toBe(false);
-    expect(isRootBlankAreaEventTarget({
-      target: root,
-      currentTarget: root
-    })).toBe(true);
-  });
-
-  it('moves Project Tree focus with arrow keys', () => {
-    const events = [
-      keyboardEvent({ key: 'ArrowDown' }),
-      keyboardEvent({ key: 'ArrowRight' }),
-      keyboardEvent({ key: 'ArrowLeft' })
-    ];
-    const selections: ProjectTreeSelectionState[] = [];
-    const expandedChanges: Set<string>[] = [];
-    const expanded = new Set(['assets']);
-    const collapsed = new Set<string>();
-    const visibleItems = flattenProjectTree(buildProjectFileTree([
-      { kind: 'file', projectRelativePath: 'assets/cover.png' },
-      { kind: 'file', projectRelativePath: 'briefs/concept.md' }
-    ]), expanded);
-    const collapsedVisibleItems = flattenProjectTree(buildProjectFileTree([
-      { kind: 'file', projectRelativePath: 'assets/cover.png' },
-      { kind: 'file', projectRelativePath: 'briefs/concept.md' }
-    ]), collapsed);
-
-    handleProjectTreeKeyboardEvent({
-      event: events[0]!,
-      editing: undefined,
-      selection: selection(['assets']),
-      visibleItems,
-      expanded,
-      productPlatform: 'win32',
-      onSelectionChange: (next) => selections.push(next),
-      onExpandedChange: (next) => expandedChanges.push(next)
-    });
-    handleProjectTreeKeyboardEvent({
-      event: events[1]!,
-      editing: undefined,
-      selection: selection(['assets']),
-      visibleItems: collapsedVisibleItems,
-      expanded: collapsed,
-      productPlatform: 'win32',
-      onSelectionChange: (next) => selections.push(next),
-      onExpandedChange: (next) => expandedChanges.push(next)
-    });
-    handleProjectTreeKeyboardEvent({
-      event: events[2]!,
-      editing: undefined,
-      selection: selection(['assets']),
-      visibleItems,
-      expanded,
-      productPlatform: 'win32',
-      onSelectionChange: (next) => selections.push(next),
-      onExpandedChange: (next) => expandedChanges.push(next)
-    });
-
-    expect(selections).toEqual([
-      selection(['assets/cover.png'])
+  it('projects the Runtime flat DFS directly and skips collapsed descendants', () => {
+    const tree = entries([
+      ['', 'directory'],
+      ['assets', 'directory'],
+      ['assets/pages', 'directory'],
+      ['assets/pages/one.png', 'file'],
+      ['assets/cover.png', 'file'],
+      ['brief.md', 'file']
     ]);
-    expect([...(expandedChanges[0] ?? [])]).toEqual(['assets']);
-    expect([...(expandedChanges[1] ?? [])]).toEqual([]);
-    expect(events[0]!.preventDefault).toHaveBeenCalledTimes(1);
-    expect(events[1]!.preventDefault).toHaveBeenCalledTimes(1);
-    expect(events[2]!.preventDefault).toHaveBeenCalledTimes(1);
+
+    expect(projectExplorerRows(tree, new Set(['assets']), undefined).map(rowPath)).toEqual([
+      'assets',
+      'assets/pages',
+      'assets/cover.png',
+      'brief.md'
+    ]);
+    expect(projectExplorerRows(tree, new Set(['assets', 'assets/pages']), undefined).map(rowPath)).toEqual([
+      'assets',
+      'assets/pages',
+      'assets/pages/one.png',
+      'assets/cover.png',
+      'brief.md'
+    ]);
   });
 
-  it('clears cut state without dispatching a file command on Escape', () => {
-    const commands: Array<{ command: ProjectTreeFileKeyboardCommand; target: WorkbenchContextMenuTarget }> = [];
-    const onClearCut = vi.fn();
-    const event = keyboardEvent({ key: 'Escape' });
+  it('derives depth, parent index, and sibling ARIA positions in one flat scan', () => {
+    const rows = projectExplorerRows(entries([
+      ['', 'directory'],
+      ['assets', 'directory'],
+      ['assets/a.png', 'file'],
+      ['assets/b.png', 'file'],
+      ['brief.md', 'file']
+    ]), new Set(['assets']), undefined);
 
-    handleProjectTreeKeyboardEvent({
-      event,
-      editing: undefined,
-      selection: selection(['assets']),
-      visibleItems: flattenProjectTree(buildProjectFileTree([
-        { kind: 'directory', projectRelativePath: 'assets' }
-      ]), new Set(['assets'])),
-      productPlatform: 'darwin',
-      onClearCut,
-      onKeyboardFileCommand: (command, target) => commands.push({ command, target })
-    });
+    expect(rows).toMatchObject([
+      { kind: 'entry', depth: 0, parentIndex: -1, positionInSet: 1, setSize: 2 },
+      { kind: 'entry', depth: 1, parentIndex: 0, positionInSet: 1, setSize: 2 },
+      { kind: 'entry', depth: 1, parentIndex: 0, positionInSet: 2, setSize: 2 },
+      { kind: 'entry', depth: 0, parentIndex: -1, positionInSet: 2, setSize: 2 }
+    ]);
+  });
 
-    expect(commands).toEqual([]);
-    expect(onClearCut).toHaveBeenCalledTimes(1);
-    expect(event.preventDefault).toHaveBeenCalledTimes(1);
-    expect(event.stopPropagation).toHaveBeenCalledTimes(1);
+  it('places a create row immediately after its expanded parent', () => {
+    const edit: ProjectExplorerViewState['edit'] = {
+      target: { kind: 'create', entryKind: 'file', parentProjectRelativePath: 'assets' },
+      value: 'new.png',
+      revision: 3,
+      phase: 'editing'
+    };
+    const rows = projectExplorerRows(entries([
+      ['', 'directory'],
+      ['assets', 'directory'],
+      ['assets/a.png', 'file']
+    ]), new Set(['assets']), edit);
+
+    expect(rows.map(rowPath)).toEqual(['assets', '<create:assets>', 'assets/a.png']);
+    expect(rows[1]).toMatchObject({ kind: 'create', depth: 1, parentIndex: 0 });
+  });
+
+  it('uses one fixed row height and a bounded virtual range', () => {
+    expect(PROJECT_TREE_ROW_HEIGHT).toBe(28);
+    expect(projectTreeViewportRange({
+      scrollTop: 2_800,
+      clientHeight: 280,
+      rowCount: 1_000,
+      overscan: 4
+    })).toEqual({ start: 96, end: 114 });
+  });
+
+  it('mounts only the initial virtual window for a deeply expanded tree', () => {
+    const projectTree: ProjectTreeEntry[] = [{
+      projectRelativePath: '',
+      kind: 'directory',
+      directoryState: 'loaded'
+    }];
+    const expanded = new Set<string>();
+    let path = '';
+    for (let index = 0; index < 200; index += 1) {
+      path = path ? `${path}/d${index}` : `d${index}`;
+      expanded.add(path);
+      projectTree.push({ projectRelativePath: path, kind: 'directory', directoryState: 'loaded' });
+    }
+    const state = viewState({ expanded });
+    const html = renderStaticWithI18n(
+      <ProjectTree
+        generation={9}
+        snapshot={{ projectTree } as WorkbenchProjectSessionSnapshot}
+        state={state}
+        productPlatform="darwin"
+        onSelectionChange={() => undefined}
+        onToggleDirectory={() => undefined}
+        onBeginRename={() => undefined}
+        onBeginCreate={() => undefined}
+        onEditValueChange={() => undefined}
+        onEditSubmit={() => undefined}
+        onEditCancel={() => undefined}
+        onInternalDrop={() => undefined}
+        onExternalDrop={() => undefined}
+        onExternalDropError={() => undefined}
+      />
+    );
+
+    expect((html.match(/data-row-index=/g) ?? []).length).toBeLessThanOrEqual(8);
+    expect(html).toContain(`height:${200 * PROJECT_TREE_ROW_HEIGHT}px`);
   });
 });
 
-function selection(selectedPaths: string[]): ProjectTreeSelectionState {
-  return {
-    selectedPaths,
-    focusedPath: selectedPaths.at(-1) ?? null,
-    anchorPath: selectedPaths.at(-1) ?? null
-  };
+function entries(input: Array<[string, 'file' | 'directory']>): ProjectTreeEntry[] {
+  return input.map(([projectRelativePath, kind]) => ({
+    projectRelativePath,
+    kind,
+    ...(kind === 'directory' ? { directoryState: 'loaded' as const } : {})
+  }));
 }
 
-function keyboardEvent(input: {
-  key: string;
-  ctrlKey?: boolean;
-  metaKey?: boolean;
-  altKey?: boolean;
-  shiftKey?: boolean;
-}) {
+function rowPath(row: ReturnType<typeof projectExplorerRows>[number]): string {
+  return row.kind === 'entry'
+    ? row.entry.projectRelativePath
+    : `<create:${row.parentProjectRelativePath}>`;
+}
+
+function viewState(input: { expanded?: Set<string> } = {}): ProjectExplorerViewState {
   return {
-    ...input,
-    preventDefault: vi.fn(),
-    stopPropagation: vi.fn()
+    acceptedProjectRevision: 1,
+    selection: { selectedPaths: [], focusedPath: null, anchorPath: null },
+    expanded: input.expanded ?? new Set(),
+    clipboard: undefined,
+    edit: undefined
   };
 }

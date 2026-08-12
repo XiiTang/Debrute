@@ -365,7 +365,7 @@ function requestCanvasMinimapPointerDownCameraChange(input: {
     camera: runtimeSnapshot.camera,
     surfaceSize: runtimeSnapshot.surfaceSize
   });
-  input.runtime.camera.setCamera(next.camera);
+  input.runtime.camera.setCamera(next.camera, 'minimap');
   return next.dragState;
 }
 
@@ -393,7 +393,7 @@ function requestCanvasMinimapPointerMoveCameraChange(input: {
     }),
     camera: runtimeSnapshot.camera,
     surfaceSize: runtimeSnapshot.surfaceSize
-  }));
+  }), 'minimap');
   return true;
 }
 

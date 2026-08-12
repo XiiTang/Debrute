@@ -1,6 +1,7 @@
 import type {
-  ProjectPathEntry,
   ProjectPathBatchOperationResult,
+  ProjectPathEntry,
+  ProjectPathRef,
   ProjectTextLanguageId,
   ProjectTreeEntry,
   ProjectTextFile,
@@ -42,7 +43,9 @@ export type {
 } from './desktopShell.js';
 export type { DebruteProductPlatform } from './productPlatform.js';
 export type {
+  ProjectPathBatchItemResult,
   ProjectPathEntry,
+  ProjectPathRef,
   ProjectTreeEntry,
   ProjectTextLanguageId,
   WriteProjectTextFileInput
@@ -419,8 +422,12 @@ export interface WorkbenchProjectFileOperationResult extends ProjectPathEntry, R
 
 export interface WorkbenchProjectFileBatchOperationResult extends ProjectPathBatchOperationResult, RevisionedProjectResult {}
 
+export type WorkbenchProjectFileBatchAttemptResult =
+  | (WorkbenchProjectFileBatchOperationResult & { outcome: 'applied' })
+  | (RevisionedProjectResult & { outcome: 'conflict' });
+
 interface WorkbenchProjectCopyPathsInput {
-  entries: ProjectPathEntry[];
+  entries: ProjectPathRef[];
   targetDirectoryProjectRelativePath: string;
 }
 
@@ -429,12 +436,12 @@ interface WorkbenchProjectMovePathsInput extends WorkbenchProjectCopyPathsInput 
 }
 
 interface WorkbenchProjectDeletePathsInput {
-  entries: ProjectPathEntry[];
+  entries: ProjectPathRef[];
 }
 
 export interface WorkbenchProjectPathClipboardInput {
   format: 'absolute' | 'relative';
-  entries: ProjectPathEntry[];
+  entries: ProjectPathRef[];
 }
 
 interface WorkbenchProjectExternalLocalImportInput {
@@ -446,11 +453,11 @@ interface WorkbenchProjectExternalLocalImportInput {
 type WorkbenchProjectUploadImportEntry =
   | {
       kind: 'directory';
-      projectRelativePath: string;
+      relativePath: string;
     }
   | {
       kind: 'file';
-      projectRelativePath: string;
+      relativePath: string;
       file: Blob;
     };
 
@@ -464,11 +471,11 @@ export interface RuntimeProjectUploadImportPlan {
   entries: Array<
     | {
         kind: 'directory';
-        projectRelativePath: string;
+        relativePath: string;
       }
     | {
         kind: 'file';
-        projectRelativePath: string;
+        relativePath: string;
         fileField: string;
       }
   >;
@@ -1759,12 +1766,12 @@ export interface WorkbenchApiClient {
   createProjectDirectory(input: { parentProjectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   renameProjectPath(input: { projectRelativePath: string; name: string }): Promise<WorkbenchProjectFileOperationResult>;
   copyProjectPaths(input: WorkbenchProjectCopyPathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
-  moveProjectPaths(input: WorkbenchProjectMovePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
+  moveProjectPaths(input: WorkbenchProjectMovePathsInput): Promise<WorkbenchProjectFileBatchAttemptResult>;
   copyProjectPathsToSystemClipboard(input: WorkbenchProjectPathClipboardInput): Promise<{ ok: true }>;
   trashProjectPaths(input: WorkbenchProjectDeletePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   deleteProjectPathsPermanently(input: WorkbenchProjectDeletePathsInput): Promise<WorkbenchProjectFileBatchOperationResult>;
-  importExternalLocalProjectPaths(input: WorkbenchProjectExternalLocalImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
-  importExternalProjectUploads(input: WorkbenchProjectUploadImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
+  importExternalLocalProjectPaths(input: WorkbenchProjectExternalLocalImportInput): Promise<WorkbenchProjectFileBatchAttemptResult>;
+  importExternalProjectUploads(input: WorkbenchProjectUploadImportInput): Promise<WorkbenchProjectFileBatchAttemptResult>;
   revealProjectPathInSystemFileManager(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
   lookupModelArtifactProvenance(
     input: { projectRelativePath: string },

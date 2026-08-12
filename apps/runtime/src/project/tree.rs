@@ -87,7 +87,7 @@ impl ProjectTree {
 
     pub(crate) fn is_loaded_dependency(&self, path: &str) -> bool {
         let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent);
-        parent.is_empty() || self.directory_is_loaded(parent)
+        parent.is_empty() || self.directory_was_loaded(parent)
     }
 
     pub(crate) fn reload_loaded(&mut self) -> Result<ProjectTreeChange, ProjectError> {
@@ -220,7 +220,7 @@ impl ProjectTree {
                     .map_or_else(String::new, |(parent, _)| parent.to_owned());
                 [parent, path.project_relative_path.clone()]
             })
-            .filter(|directory| self.directory_is_loaded(directory))
+            .filter(|directory| self.directory_was_loaded(directory))
             .collect::<BTreeSet<_>>();
         let mut change = ProjectTreeChange::default();
         for directory in directories {
@@ -277,7 +277,7 @@ impl ProjectTree {
         let directories = changed_paths
             .iter()
             .map(|path| parent_path(path).to_owned())
-            .filter(|directory| self.directory_is_loaded(directory))
+            .filter(|directory| self.directory_was_loaded(directory))
             .collect::<BTreeSet<_>>();
         let mut change = ProjectTreeChange::default();
         for directory in directories {
@@ -312,6 +312,22 @@ impl ProjectTree {
     }
 
     fn directory_is_loaded(&self, directory: &str) -> bool {
+        if directory.is_empty() {
+            return matches!(
+                self.root_entry.directory_state,
+                Some(ProjectDirectoryState::Loaded)
+            );
+        }
+        self.entries.get(directory).is_some_and(|entry| {
+            entry.public.kind == ProjectPathKind::Directory
+                && matches!(
+                    entry.public.directory_state,
+                    Some(ProjectDirectoryState::Loaded)
+                )
+        })
+    }
+
+    fn directory_was_loaded(&self, directory: &str) -> bool {
         if directory.is_empty() {
             return matches!(
                 self.root_entry.directory_state,
@@ -561,6 +577,56 @@ mod tests {
         );
         assert!(tree.entry("assets/nested/old.txt").is_some());
         assert!(tree.entry("assets/new.txt").is_some());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ordered_entries_are_root_first_directory_first_flat_dfs() {
+        let root = fixture_root();
+        fs::create_dir_all(root.join("a/nested")).unwrap();
+        fs::create_dir(root.join("z")).unwrap();
+        fs::write(root.join("a/child.txt"), "child").unwrap();
+        fs::write(root.join("root.txt"), "root").unwrap();
+        let tree = loaded_tree(&root, &["a"]);
+
+        assert_eq!(
+            tree.ordered_entries()
+                .into_iter()
+                .map(|entry| entry.project_relative_path)
+                .collect::<Vec<_>>(),
+            ["", "a", "a/nested", "a/child.txt", "z", "root.txt"]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_load_retries_a_directory_error_and_recovers_loaded_state() {
+        let root = fixture_root();
+        fs::create_dir(root.join("assets")).unwrap();
+        let mut tree = loaded_tree(&root, &["assets"]);
+        tree.set_directory_error("assets", "temporary failure");
+        fs::write(root.join("assets/recovered.txt"), "ready").unwrap();
+
+        tree.load_directories(&["assets".to_owned()]).unwrap();
+
+        assert_eq!(
+            tree.entry("assets").unwrap().directory_state,
+            Some(ProjectDirectoryState::Loaded)
+        );
+        assert_eq!(tree.entry("assets").unwrap().directory_error, None);
+        assert!(tree.entry("assets/recovered.txt").is_some());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn directory_errors_remain_watcher_dependencies_until_they_recover() {
+        let root = fixture_root();
+        fs::create_dir(root.join("assets")).unwrap();
+        let mut tree = loaded_tree(&root, &["assets"]);
+        tree.set_directory_error("assets", "temporary failure");
+
+        assert!(tree.is_loaded_dependency("assets/recovered.txt"));
+
         fs::remove_dir_all(root).unwrap();
     }
 

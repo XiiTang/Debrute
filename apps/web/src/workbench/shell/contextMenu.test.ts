@@ -43,8 +43,8 @@ describe('Workbench context menu', () => {
     expect(actionCommands(buildWorkbenchContextMenuItems({
       target: {
         source: 'explorer',
-        invocationEntry: { pathEntry: { projectRelativePath: '', kind: 'directory' } },
-        selectedEntries: []
+        invocation: { projectRelativePath: '', kind: 'directory' },
+        selection: []
       },
       projection: undefined
     }))).toEqual(['create-file', 'create-directory', 'paste', 'open-terminal']);
@@ -54,8 +54,8 @@ describe('Workbench context menu', () => {
     expect(actionCommands(buildWorkbenchContextMenuItems({
       target: {
         source: 'explorer',
-        invocationEntry: { pathEntry: { projectRelativePath: 'notes/readme.md', kind: 'file' } },
-        selectedEntries: [{ pathEntry: { projectRelativePath: 'notes/readme.md', kind: 'file' } }]
+        invocation: { projectRelativePath: 'notes/readme.md', kind: 'file' },
+        selection: [{ projectRelativePath: 'notes/readme.md', kind: 'file' }]
       },
       projection: undefined
     }))).toContain('inspect');
@@ -186,20 +186,17 @@ function canvasTarget(
     availability?: 'available' | 'missing' | 'unreadable';
   }>
 ): WorkbenchContextMenuTarget {
-  const candidates = selectedEntries.map((entry) => ({
-    pathEntry: {
-      projectRelativePath: entry.projectRelativePath,
-      kind: entry.kind,
-      ...(entry.sizeBytes === undefined ? {} : { sizeBytes: entry.sizeBytes })
-    },
-    ...(entry.availability === undefined ? {} : { availability: entry.availability })
+  const selection = selectedEntries.map((entry) => ({
+    projectRelativePath: entry.projectRelativePath,
+    kind: entry.kind,
+    ...(entry.availability === 'missing' ? { missing: true as const } : {})
   }));
   return {
     source: 'canvas',
-    invocationEntry: candidates.find((candidate) => (
-      candidate.pathEntry.projectRelativePath === invocationPath
+    invocation: selection.find((candidate) => (
+      candidate.projectRelativePath === invocationPath
     ))!,
-    selectedEntries: candidates
+    selection
   };
 }
 

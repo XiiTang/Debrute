@@ -96,7 +96,7 @@ export function WorkbenchActivitySurfaces({
       window.removeEventListener('resize', updateAnchor);
       observer?.disconnect();
     };
-  });
+  }, [activityBellRef]);
 
   useEffect(() => {
     if (snapshot.centerPresentation === 'hidden' && snapshot.floatingCards.length === 0) return;

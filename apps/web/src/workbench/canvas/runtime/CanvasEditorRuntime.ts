@@ -16,6 +16,7 @@ import {
   cameraPanBy,
   canvasCameraReset,
   type CanvasCamera,
+  type CanvasCameraChangeOrigin,
   type CanvasCameraState
 } from './canvasCamera';
 import {
@@ -70,10 +71,9 @@ export interface CanvasRuntimeSnapshot {
 
 export interface CanvasCameraController {
   getCamera(): CanvasCamera;
-  setCamera(camera: CanvasCamera): void;
+  setCamera(camera: CanvasCamera, origin?: CanvasCameraChangeOrigin): void;
   panBy(screenDelta: CanvasPoint): void;
-  zoomByWheel(input: { screenPoint: CanvasPoint; delta: NormalizedCanvasWheelDelta }): void;
-  zoomByGesture(input: { origin: CanvasPoint; scale: number; delta: CanvasPoint }): void;
+  applyWheel(input: { screenPoint: CanvasPoint; delta: NormalizedCanvasWheelDelta }): void;
   centerOn(canvasPoint: CanvasPoint): void;
   reset(): void;
 }
@@ -126,7 +126,7 @@ export interface CanvasEditorRuntime {
   readonly input: CanvasInputController;
   readonly scene: CanvasRuntimeScene;
   subscribe(listener: (snapshot: CanvasRuntimeSnapshot) => void): () => void;
-  subscribeCamera(listener: (camera: CanvasCamera) => void): () => void;
+  subscribeCamera(listener: (camera: CanvasCamera, origin: CanvasCameraChangeOrigin) => void): () => void;
   subscribeCameraState(listener: (state: CanvasCameraState) => void): () => void;
   subscribeSelection(listener: (selection: CanvasSelection | undefined) => void): () => void;
   subscribeContentInteraction(listener: (projectRelativePath: string | undefined) => void): () => void;
@@ -245,7 +245,7 @@ export function createCanvasEditorRuntime(initial: {
   selection?: CanvasSelection | undefined;
 }): CanvasEditorRuntime {
   const listeners = new Set<(snapshot: CanvasRuntimeSnapshot) => void>();
-  const cameraListeners = new Set<(camera: CanvasCamera) => void>();
+  const cameraListeners = new Set<(camera: CanvasCamera, origin: CanvasCameraChangeOrigin) => void>();
   const cameraStateListeners = new Set<(state: CanvasCameraState) => void>();
   const selectionListeners = new Set<(selection: CanvasSelection | undefined) => void>();
   const contentInteractionListeners = new Set<(projectRelativePath: string | undefined) => void>();
@@ -366,13 +366,13 @@ export function createCanvasEditorRuntime(initial: {
     }, CANVAS_CAMERA_IDLE_MS);
   };
 
-  const flushCameraListeners = (camera: CanvasCamera) => {
+  const flushCameraListeners = (camera: CanvasCamera, origin: CanvasCameraChangeOrigin) => {
     for (const listener of cameraListeners) {
-      listener(camera);
+      listener(camera, origin);
     }
   };
 
-  const commitCamera = (camera: CanvasCamera) => {
+  const commitCamera = (camera: CanvasCamera, origin: CanvasCameraChangeOrigin) => {
     if (disposed) {
       return;
     }
@@ -381,7 +381,7 @@ export function createCanvasEditorRuntime(initial: {
     state.camera = camera;
     state.cameraState = 'moving';
     invalidateSnapshot();
-    flushCameraListeners(camera);
+    flushCameraListeners(camera, origin);
     if (previousCameraState !== 'moving') {
       flushCameraStateListeners('moving');
     }
@@ -408,27 +408,20 @@ export function createCanvasEditorRuntime(initial: {
 
   const cameraController: CanvasCameraController = {
     getCamera: () => state.camera,
-    setCamera: (camera) => commitCamera(camera),
-    panBy: (screenDelta) => commitCamera(cameraPanBy(state.camera, screenDelta)),
-    zoomByWheel: (input) => commitCamera(cameraForWheelDelta({
+    setCamera: (camera, origin = 'programmatic') => commitCamera(camera, origin),
+    panBy: (screenDelta) => commitCamera(cameraPanBy(state.camera, screenDelta), 'pan'),
+    applyWheel: (input) => commitCamera(cameraForWheelDelta({
       camera: state.camera,
       surfaceRect: surfaceRect(),
       screenPoint: input.screenPoint,
       delta: input.delta
-    })),
-    zoomByGesture: (input) => commitCamera(cameraForGestureZoom({
-      camera: state.camera,
-      surfaceRect: surfaceRect(),
-      origin: input.origin,
-      scale: input.scale,
-      delta: input.delta
-    })),
+    }), input.delta.z === 0 ? 'pan' : 'zoom'),
     centerOn: (canvasPoint) => commitCamera(cameraCenteredOnCanvasPoint({
       center: canvasPoint,
       surfaceSize: measuredSurfaceSize(),
       camera: state.camera
-    })),
-    reset: () => commitCamera(canvasCameraReset())
+    }), 'programmatic'),
+    reset: () => commitCamera(canvasCameraReset(), 'programmatic')
   };
 
   const coordinates: CanvasCoordinateSystem = {
@@ -806,7 +799,7 @@ export function createCanvasEditorRuntime(initial: {
       return;
     }
     event.preventDefault();
-    cameraController.zoomByWheel({
+    cameraController.applyWheel({
       screenPoint: { x: event.clientX, y: event.clientY },
       delta: normalizeCanvasWheelDelta(event)
     });
@@ -857,7 +850,7 @@ export function createCanvasEditorRuntime(initial: {
         x: gesture.clientX - start.origin.x,
         y: gesture.clientY - start.origin.y
       }
-    }));
+    }), 'zoom');
   };
 
   const handleGestureEnd = () => {

@@ -20,6 +20,7 @@ import {
   CanvasSurface
 } from './CanvasSurface';
 import {
+  attachCanvasCameraPerformanceBeforeRender,
   canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,
   canvasFeedbackBarTargetForSelection,
@@ -31,6 +32,7 @@ import {
   type CanvasPerfRuntimeSession
 } from './canvasSurfaceSupport';
 import { createCanvasPerfMonitor } from './CanvasPerfMonitor';
+import { createCanvasRenderLifecycle } from './CanvasRenderLifecycle';
 import { CANVAS_CAMERA_IDLE_MS, type CanvasCamera } from './runtime/canvasCamera';
 import { createCanvasStageRuntime } from './runtime/CanvasStageRuntime';
 import type { CanvasSelection } from './runtime/canvasSelection';
@@ -1366,16 +1368,10 @@ describe('CanvasSurface', () => {
         selectedInvocation.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       });
       expect(onOpenContextMenu).toHaveBeenLastCalledWith(expect.objectContaining({
-        invocationEntry: expect.objectContaining({
-          pathEntry: expect.objectContaining({ projectRelativePath: 'flow/b.png' })
-        }),
-        selectedEntries: [
-          expect.objectContaining({
-            pathEntry: expect.objectContaining({ projectRelativePath: 'flow/a.png' })
-          }),
-          expect.objectContaining({
-            pathEntry: expect.objectContaining({ projectRelativePath: 'flow/b.png' })
-          })
+        invocation: expect.objectContaining({ projectRelativePath: 'flow/b.png' }),
+        selection: [
+          expect.objectContaining({ projectRelativePath: 'flow/a.png' }),
+          expect.objectContaining({ projectRelativePath: 'flow/b.png' })
         ]
       }), { x: 0, y: 0 });
 
@@ -1399,12 +1395,8 @@ describe('CanvasSurface', () => {
         projectRelativePaths: ['flow/c.png']
       });
       expect(onOpenContextMenu).toHaveBeenLastCalledWith(expect.objectContaining({
-        invocationEntry: expect.objectContaining({
-          pathEntry: expect.objectContaining({ projectRelativePath: 'flow/c.png' })
-        }),
-        selectedEntries: [expect.objectContaining({
-          pathEntry: expect.objectContaining({ projectRelativePath: 'flow/c.png' })
-        })]
+        invocation: expect.objectContaining({ projectRelativePath: 'flow/c.png' }),
+        selection: [expect.objectContaining({ projectRelativePath: 'flow/c.png' })]
       }), { x: 0, y: 0 });
 
       const callCount = onOpenContextMenu.mock.calls.length;
@@ -1422,7 +1414,7 @@ describe('CanvasSurface', () => {
     }
   });
 
-  it('opens Canvas Project Path Commands with only current available-node size facts', async () => {
+  it('opens Canvas Project Path Commands with missing as the only availability qualifier', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -1480,21 +1472,13 @@ describe('CanvasSurface', () => {
 
       expect(onOpenContextMenu).toHaveBeenCalledWith({
         source: 'canvas',
-        invocationEntry: {
-          availability: 'available',
-          pathEntry: {
-            projectRelativePath: 'data/deep/cover.png',
-            kind: 'file',
-            sizeBytes: 12_345
-          }
+        invocation: {
+          projectRelativePath: 'data/deep/cover.png',
+          kind: 'file'
         },
-        selectedEntries: [{
-          availability: 'available',
-          pathEntry: {
-            projectRelativePath: 'data/deep/cover.png',
-            kind: 'file',
-            sizeBytes: 12_345
-          }
+        selection: [{
+          projectRelativePath: 'data/deep/cover.png',
+          kind: 'file'
         }]
       }, { x: 40, y: 60 });
 
@@ -1512,19 +1496,15 @@ describe('CanvasSurface', () => {
       });
       expect(onOpenContextMenu).toHaveBeenLastCalledWith({
         source: 'canvas',
-        invocationEntry: {
-          availability: 'missing',
-          pathEntry: {
-            projectRelativePath: 'data/deep/missing.png',
-            kind: 'file'
-          }
+        invocation: {
+          projectRelativePath: 'data/deep/missing.png',
+          kind: 'file',
+          missing: true
         },
-        selectedEntries: [{
-          availability: 'missing',
-          pathEntry: {
-            projectRelativePath: 'data/deep/missing.png',
-            kind: 'file'
-          }
+        selection: [{
+          projectRelativePath: 'data/deep/missing.png',
+          kind: 'file',
+          missing: true
         }]
       }, { x: 80, y: 100 });
 
@@ -1542,19 +1522,13 @@ describe('CanvasSurface', () => {
       });
       expect(onOpenContextMenu).toHaveBeenLastCalledWith({
         source: 'canvas',
-        invocationEntry: {
-          availability: 'unreadable',
-          pathEntry: {
-            projectRelativePath: 'data/deep/unreadable.png',
-            kind: 'file'
-          }
+        invocation: {
+          projectRelativePath: 'data/deep/unreadable.png',
+          kind: 'file'
         },
-        selectedEntries: [{
-          availability: 'unreadable',
-          pathEntry: {
-            projectRelativePath: 'data/deep/unreadable.png',
-            kind: 'file'
-          }
+        selection: [{
+          projectRelativePath: 'data/deep/unreadable.png',
+          kind: 'file'
         }]
       }, { x: 120, y: 140 });
     } finally {
@@ -2973,7 +2947,7 @@ describe('CanvasSurface', () => {
       perfMonitor: monitor,
       sessionRef,
       snapshot: { cameraState: 'moving', camera: { x: 0, y: 0, z: 1 } },
-      minimapOpen: false
+      origin: 'pan'
     });
     monitor.recordCounter({ timestamp: 5, source: 'CanvasRenderLifecycle', name: 'render-snapshot-build' });
     monitor.recordCounter({ timestamp: 6, source: 'CanvasRenderLifecycle', name: 'render-snapshot-reuse' });
@@ -2987,7 +2961,7 @@ describe('CanvasSurface', () => {
       perfMonitor: monitor,
       sessionRef,
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } },
-      minimapOpen: false,
+      origin: 'pan',
       getFinalState: () => ({
         mountedNodeCount: 2,
         visibleNodeCount: 1,
@@ -3024,17 +2998,102 @@ describe('CanvasSurface', () => {
         cameraState: 'moving',
         camera: { x: 0, y: 0, z: 1 }
       },
-      minimapOpen: false
+      origin: 'pan'
     });
     syncCanvasPerfSessionState({
       perfMonitor: monitor,
       sessionRef,
       snapshot: { cameraState: 'idle', camera: { x: 0, y: 0, z: 1 } },
-      minimapOpen: false
+      origin: 'pan'
     });
 
     expect(monitor.getLastSession()?.counters).toEqual({});
     expect(monitor.getTrace().events.map((event) => event.kind)).toEqual(['session-start', 'session-end']);
+  });
+
+  it('maps camera origins and switches sessions within one moving period', () => {
+    const monitor = createCanvasPerfMonitor();
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+    const moving = { cameraState: 'moving' as const, camera: { x: 0, y: 0, z: 1 } };
+
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'programmatic' });
+    expect(sessionRef.current).toBeUndefined();
+
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'pan' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'pan' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'zoom' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'minimap' });
+    syncCanvasPerfSessionState({ perfMonitor: monitor, sessionRef, snapshot: moving, origin: 'programmatic' });
+    monitor.recordCounter({ timestamp: 10, source: 'CanvasStageRuntime', name: 'stage-camera-write' });
+
+    expect(sessionRef.current).toBeUndefined();
+    expect(monitor.getTrace().events
+      .filter((event) => event.kind === 'session-start')
+      .map((event) => event.type)).toEqual([
+      'camera-pan',
+      'camera-zoom',
+      'camera-minimap'
+    ]);
+    expect(monitor.getTrace().sessions.map((session) => session.type)).toEqual([
+      'camera-pan',
+      'camera-zoom',
+      'camera-minimap'
+    ]);
+    const events = monitor.getTrace().events;
+    expect(events[1]?.timestamp).toBe(events[2]?.timestamp);
+    expect(events[3]?.timestamp).toBe(events[4]?.timestamp);
+    expect(monitor.getCounterTotals()).toEqual({ 'stage-camera-write': 1 });
+  });
+
+  it('transitions camera performance sessions before render hot-path work', () => {
+    const monitor = createCanvasPerfMonitor();
+    const sessionRef = { current: undefined as CanvasPerfRuntimeSession | undefined };
+    const runtime = createCanvasEditorRuntime({
+      initialProjection: { nodes: [], edges: [] },
+      submitManualLayout: async () => undefined
+    });
+    const stageRuntime = createCanvasStageRuntime({ perfMonitor: monitor });
+    const unbindStage = stageRuntime.bindStage(document.createElement('div'));
+    const renderLifecycle = createCanvasRenderLifecycle({
+      runtime,
+      stageRuntime,
+      perfMonitor: monitor
+    });
+    const detach = attachCanvasCameraPerformanceBeforeRender({
+      runtime,
+      renderLifecycle,
+      onCameraBeforeRender: (camera, origin) => {
+        syncCanvasPerfSessionState({
+          perfMonitor: monitor,
+          sessionRef,
+          snapshot: {
+            cameraState: runtime.getSnapshot().cameraState,
+            camera
+          },
+          origin
+        });
+      }
+    });
+
+    runtime.camera.panBy({ x: 10, y: 0 });
+    runtime.camera.applyWheel({
+      screenPoint: { x: 0, y: 0 },
+      delta: { x: 0, y: 0, z: 0.1 }
+    });
+    runtime.camera.setCamera({ x: 30, y: 20, z: 1.1 }, 'programmatic');
+
+    expect(monitor.getTrace().sessions.map((session) => ({
+      type: session.type,
+      stageCameraWrites: session.counters['stage-camera-write'] ?? 0
+    }))).toEqual([
+      { type: 'camera-pan', stageCameraWrites: 1 },
+      { type: 'camera-zoom', stageCameraWrites: 1 }
+    ]);
+
+    detach();
+    unbindStage();
+    stageRuntime.dispose();
+    runtime.dispose();
   });
 
   it('starts and ends a move drag session with direct render commit counters', () => {
@@ -3169,7 +3228,6 @@ function surface(
     runtime?: ReturnType<typeof createCanvasEditorRuntime>;
     actions?: Parameters<typeof CanvasSurface>[0]['actions'];
     canvasState?: CanvasState;
-    minimapOpen?: boolean;
   } = {}
 ): React.ReactElement {
   const runtime = input.runtime ?? canvasRuntimeFixture(projection, input);
@@ -3187,7 +3245,6 @@ function surface(
         textFileBuffers={input.textFileBuffers ?? {}}
         canvasFeedback={input.canvasFeedback}
         feedbackInteraction={input.feedbackInteraction}
-        minimapOpen={input.minimapOpen}
         cutPaths={input.cutPaths}
         textPreviewStyleDependencyKey="dark"
       />
