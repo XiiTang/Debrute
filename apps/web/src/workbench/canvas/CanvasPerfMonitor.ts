@@ -1,5 +1,6 @@
 export type CanvasPerfSessionType =
   | 'camera-pan'
+  | 'camera-zoom'
   | 'camera-minimap'
   | 'pointer-selection'
   | 'pointer-move-node'
@@ -66,6 +67,7 @@ export type CanvasPerfSessionId = `${CanvasPerfSessionType}:${number}`;
 
 export const CANVAS_PERF_INTERACTION_SESSION_TYPES = [
   'camera-pan',
+  'camera-zoom',
   'camera-minimap',
   'pointer-selection',
   'pointer-move-node',

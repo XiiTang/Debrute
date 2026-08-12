@@ -14,8 +14,6 @@ mod desktop_window_topology;
 mod exact_model_registry;
 #[path = "global_runtime_state.rs"]
 mod global_runtime_state;
-#[path = "native_trash_worker.rs"]
-mod native_trash_worker;
 #[path = "runtime_lifecycle.rs"]
 mod runtime_lifecycle;
 #[path = "start_at_login.rs"]

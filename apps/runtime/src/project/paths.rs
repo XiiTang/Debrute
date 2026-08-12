@@ -107,11 +107,32 @@ pub fn resolve_no_symlink_existing_project_path(
     relative: &ProjectDirectoryPath,
 ) -> Result<PathBuf, ProjectError> {
     let lexical = resolve_project_path(root, relative)?;
-    assert_no_symlink_components(root, relative)?;
+    inspect_no_symlink_components(root, relative)?;
     let root_real = root.canonicalize()?;
     let target_real = lexical.canonicalize()?;
     assert_path_inside(&root_real, &target_real, relative)?;
     Ok(lexical)
+}
+
+/// Resolves one already-admitted path beneath an already-canonical Project root.
+///
+/// Unlike the public string-boundary resolver, this seam does not reopen or
+/// recanonicalize the Project root. The admitted relative type plus the
+/// no-symbolic-link component walk establish containment, existence, and the
+/// final target metadata in one pass.
+pub(crate) fn resolve_existing_admitted_project_path(
+    root: &CanonicalProjectRoot,
+    relative: &ProjectRelativePath,
+) -> Result<(PathBuf, fs::Metadata), ProjectError> {
+    let lexical = resolve_project_path(root.as_path(), relative.as_directory_path())?;
+    let metadata = inspect_no_symlink_components(root.as_path(), relative.as_directory_path())?
+        .ok_or_else(|| {
+            ProjectError::from(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Project path does not exist: {relative}"),
+            ))
+        })?;
+    Ok((lexical, metadata))
 }
 
 /// Opens one Project file and binds the no-symlink/root-containment validation to
@@ -367,7 +388,7 @@ fn resolve_project_path_for_write_inner(
     relative: &ProjectRelativePath,
 ) -> Result<PathBuf, ProjectError> {
     let lexical = resolve_project_path(root, relative.as_directory_path())?;
-    assert_no_symlink_components(root, relative.as_directory_path())?;
+    inspect_no_symlink_components(root, relative.as_directory_path())?;
     let root_real = root.canonicalize()?;
     match fs::symlink_metadata(&lexical) {
         Ok(metadata) => {
@@ -401,11 +422,12 @@ fn resolve_project_path_for_write_inner(
     }
 }
 
-fn assert_no_symlink_components(
+fn inspect_no_symlink_components(
     root: &Path,
     relative: &ProjectDirectoryPath,
-) -> Result<(), ProjectError> {
+) -> Result<Option<fs::Metadata>, ProjectError> {
     let mut current = root.to_path_buf();
+    let mut target_metadata = None;
     for component in Path::new(relative).components() {
         let Component::Normal(segment) = component else {
             return Err(ProjectError::Validation(format!(
@@ -419,12 +441,12 @@ fn assert_no_symlink_components(
                     "Project path must not contain a symbolic link: {relative}"
                 )));
             }
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Ok(metadata) => target_metadata = Some(metadata),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.into()),
         }
     }
-    Ok(())
+    Ok(target_metadata)
 }
 
 fn assert_path_inside(root: &Path, target: &Path, relative: &str) -> Result<(), ProjectError> {

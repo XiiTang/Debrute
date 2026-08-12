@@ -14,8 +14,8 @@ describe('ProjectPathContextMenuHost', () => {
     const router = { contextMenuItems, run: vi.fn() } satisfies ProjectPathCommandRouter;
     const target = {
       source: 'explorer' as const,
-      invocationEntry: { pathEntry: { projectRelativePath: 'brief.md', kind: 'file' as const } },
-      selectedEntries: [{ pathEntry: { projectRelativePath: 'brief.md', kind: 'file' as const } }]
+      invocation: { projectRelativePath: 'brief.md', kind: 'file' as const },
+      selection: [{ projectRelativePath: 'brief.md', kind: 'file' as const }]
     };
     const container = document.createElement('div');
     document.body.append(container);

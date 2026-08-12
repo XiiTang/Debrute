@@ -12,10 +12,10 @@ use uuid::Uuid;
 
 use crate::global::root_state_directory;
 use crate::project::{
-    CanvasFeedbackGeometry, CanvasFeedbackItemKind, CanvasFeedbackScope, ProjectCommand,
-    ProjectCommandResult, ProjectError, ProjectPathOperationStatus, ProjectPathStateReconciler,
-    ProjectRelativePath, normalized_geometry, project_path_is_same_or_descendant, replace_file,
-    rewrite_project_path, validate_spatial_geometry,
+    CanvasFeedbackGeometry, CanvasFeedbackItemKind, CanvasFeedbackScope, ProjectError,
+    ProjectPathChangeSet, ProjectPathStateReconciler, ProjectRelativePath, normalized_geometry,
+    project_path_is_same_or_descendant, replace_file, rewrite_project_path,
+    validate_spatial_geometry,
 };
 
 use super::RuntimeHttpServiceError;
@@ -285,11 +285,13 @@ impl ProjectPathStateReconciler for WorkingCopyStore {
     fn reconcile(
         &self,
         canonical_root: &str,
-        command: &ProjectCommand,
-        result: &ProjectCommandResult,
+        changes: &ProjectPathChangeSet,
     ) -> Result<(), ProjectError> {
-        let (removed, rewrites) = working_copy_path_changes(command, result);
-        self.reconcile_paths(canonical_root, &removed, &rewrites)
+        self.reconcile_paths(
+            canonical_root,
+            changes.invalidated_paths(),
+            changes.rewrites(),
+        )
     }
 
     fn prune(&self, canonical_root: &str, removed: &[String]) -> Result<(), ProjectError> {
@@ -317,72 +319,6 @@ impl WorkingCopyStore {
         copies.feedback = reconcile_feedback_map(copies.feedback, removed, rewrites);
         self.write_or_remove(canonical_root, &copies)
             .map_err(working_copy_project_error)
-    }
-}
-
-fn working_copy_path_changes(
-    command: &ProjectCommand,
-    result: &ProjectCommandResult,
-) -> (Vec<String>, Vec<(String, String)>) {
-    match (command, result) {
-        (
-            ProjectCommand::RenamePath {
-                project_relative_path,
-                ..
-            },
-            ProjectCommandResult::PathChanged { result, .. },
-        ) => (
-            vec![result.project_relative_path.clone()],
-            vec![(
-                project_relative_path.to_string(),
-                result.project_relative_path.clone(),
-            )],
-        ),
-        (ProjectCommand::MovePaths { .. }, ProjectCommandResult::PathsChanged { results, .. }) => {
-            let successful = results
-                .iter()
-                .filter(|result| result.status == ProjectPathOperationStatus::Ok)
-                .collect::<Vec<_>>();
-            (
-                successful
-                    .iter()
-                    .map(|result| result.project_relative_path.clone())
-                    .collect(),
-                successful
-                    .iter()
-                    .filter(|result| {
-                        result.source_project_relative_path != result.project_relative_path
-                    })
-                    .map(|result| {
-                        (
-                            result.source_project_relative_path.clone(),
-                            result.project_relative_path.clone(),
-                        )
-                    })
-                    .collect(),
-            )
-        }
-        (ProjectCommand::DeletePaths { entries }, _) => (
-            entries
-                .iter()
-                .map(|entry| entry.project_relative_path.to_string())
-                .collect(),
-            Vec::new(),
-        ),
-        (
-            ProjectCommand::CopyPaths { .. }
-            | ProjectCommand::ImportLocalPaths { .. }
-            | ProjectCommand::ImportUploadEntries { .. },
-            ProjectCommandResult::PathsChanged { results, .. },
-        ) => (
-            results
-                .iter()
-                .filter(|result| result.status == ProjectPathOperationStatus::Ok)
-                .map(|result| result.project_relative_path.clone())
-                .collect(),
-            Vec::new(),
-        ),
-        _ => (Vec::new(), Vec::new()),
     }
 }
 

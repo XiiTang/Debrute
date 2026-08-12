@@ -21,13 +21,51 @@ describe('Workbench Project Projection', () => {
       snapshot: snapshotFixture('Updated')
     });
 
-    await expect(wait).resolves.toBeUndefined();
+    await expect(wait).resolves.toMatchObject({
+      health: { projectName: 'Updated' }
+    });
     expect(projection.getState()).toMatchObject({
       status: 'bound',
       generation: 1,
       projectRevision: 5,
       snapshot: { health: { projectName: 'Updated' } }
     });
+  });
+
+  it('returns the currently accepted snapshot when the requested revision is already available', async () => {
+    const projection = createWorkbenchProjectProjection();
+    const snapshot = snapshotFixture('Current');
+    projection.acceptBoundProject({
+      bindingId: 'binding-1',
+      canonicalRoot: '/projects/example',
+      projectRevision: 4,
+      snapshot,
+      workingCopies: { text: {}, feedback: {} }
+    });
+
+    await expect(projection.waitForRevision(1, 3)).resolves.toBe(snapshot);
+  });
+
+  it('rejects a pending revision wait when its generation ends', async () => {
+    const projection = createWorkbenchProjectProjection();
+    projection.acceptBoundProject({
+      bindingId: 'binding-1',
+      canonicalRoot: '/projects/example',
+      projectRevision: 4,
+      snapshot: snapshotFixture('Initial'),
+      workingCopies: { text: {}, feedback: {} }
+    });
+    const wait = projection.waitForRevision(1, 5);
+
+    projection.acceptBoundProject({
+      bindingId: 'binding-2',
+      canonicalRoot: '/projects/other',
+      projectRevision: 1,
+      snapshot: snapshotFixture('Other'),
+      workingCopies: { text: {}, feedback: {} }
+    });
+
+    await expect(wait).rejects.toThrow('generation 1 ended');
   });
 
   it('fails a binding when the Project revision is not consecutive', () => {

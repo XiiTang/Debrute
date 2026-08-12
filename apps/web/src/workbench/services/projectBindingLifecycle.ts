@@ -11,33 +11,10 @@ export interface ProjectBindingLifecycleState {
   opening: boolean;
 }
 
-export type ProjectBindingLifecycleOutcome =
-  | {
-      outcome: 'bound';
-      bindingId: string;
-      canonicalRoot: string;
-      generation: number;
-    }
-  | {
-      outcome: 'focused_existing_desktop';
-      canonicalRoot: string;
-    }
-  | {
-      outcome: 'failed';
-      error: Error;
-    }
-  | {
-      outcome: 'superseded';
-    }
-  | {
-      outcome: 'ignored_while_opening';
-    };
-
 export interface ProjectBindingLifecycle {
   getState(): ProjectBindingLifecycleState;
   subscribe(listener: () => void): () => void;
-  open(target: WorkbenchProjectTarget): Promise<ProjectBindingLifecycleOutcome>;
-  canAcceptProjectPathCommand(generation: number): boolean;
+  open(target: WorkbenchProjectTarget): Promise<void>;
 }
 
 export function createProjectBindingLifecycle(input: {
@@ -68,48 +45,27 @@ export function createProjectBindingLifecycle(input: {
     },
     async open(target) {
       if (state.opening) {
-        return { outcome: 'ignored_while_opening' };
+        return;
       }
       const source = input.projectProjection.getState();
       transition(true);
       try {
         const opened = await input.openProject(target);
         if ('outcome' in opened) {
-          return bindingIsUnchanged(source, input.projectProjection.getState())
-            ? opened
-            : { outcome: 'superseded' };
+          return;
         }
         const accepted = input.projectProjection.getState();
-        if (
-          accepted.status !== 'bound'
-          || accepted.bindingId !== opened.bindingId
-        ) {
-          return { outcome: 'superseded' };
+        if (accepted.status !== 'bound' || accepted.bindingId !== opened.bindingId) {
+          return;
         }
         input.commitProjectRoute(accepted.canonicalRoot);
-        return {
-          outcome: 'bound',
-          bindingId: accepted.bindingId,
-          canonicalRoot: accepted.canonicalRoot,
-          generation: accepted.generation
-        };
       } catch (error) {
-        if (!bindingIsUnchanged(source, input.projectProjection.getState())) {
-          return { outcome: 'superseded' };
+        if (bindingIsUnchanged(source, input.projectProjection.getState())) {
+          throw error;
         }
-        return {
-          outcome: 'failed',
-          error: error instanceof Error ? error : new Error(String(error))
-        };
       } finally {
         transition(false);
       }
-    },
-    canAcceptProjectPathCommand(generation) {
-      const current = input.projectProjection.getState();
-      return !state.opening
-        && current.status === 'bound'
-        && current.generation === generation;
     }
   };
 }

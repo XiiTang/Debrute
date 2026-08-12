@@ -45,9 +45,7 @@ use debrute_runtime::{
         ResumeIntent, RuntimeProductService, finalize_product_removal,
         launch_product_update_failure, read_desktop_host_registration,
     },
-    project::{
-        NATIVE_TRASH_WORKER_COMMAND, initialize_raster_preview_engine, run_native_trash_worker,
-    },
+    project::initialize_raster_preview_engine,
     workbench::{
         RuntimeCliHttpService, RuntimeProductHttpService, WorkbenchHttpServer,
         WorkbenchRuntimeServices, build_project_workbench_url,
@@ -88,16 +86,6 @@ type PlatformControlOwner = WindowsControlOwner;
 fn main() -> ExitCode {
     install_runtime_panic_abort_hook();
     let command = std::env::args_os().nth(1);
-    if command.as_deref() == Some(std::ffi::OsStr::new(NATIVE_TRASH_WORKER_COMMAND)) {
-        let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
-        return match run_native_trash_worker(&arguments) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("Debrute Runtime failed: {error}");
-                ExitCode::FAILURE
-            }
-        };
-    }
     if command.as_deref() == Some(std::ffi::OsStr::new("finalize-product-removal")) {
         let arguments = std::env::args_os().skip(2).collect::<Vec<_>>();
         return match run_finalize_product_removal(&arguments) {

@@ -150,9 +150,10 @@ Focused units own cohesive state:
   existing live Photoshop resource to the Integrations page without inventing
   connection state. It does not own theme, locale, or another accepted Global
   snapshot.
-- `useProjectExplorerController` loads only after Explorer or a file-command
-  surface expresses intent, then owns selection, clipboard, inline edits, file
-  commands, and invalidation when the project changes.
+- `useProjectExplorerController` is constructed directly inside each accepted
+  Project generation and owns selection, expansion, clipboard, inline edits,
+  file commands, revision reconciliation, and invalidation when the Project
+  changes. `ProjectTree` is only its virtualized visual projection.
 - Canvas controllers own Canvas feedback, overlays, and runtime interaction.
 - Text services own editor buffers and floating editor windows.
 - The Project-scoped Inspection Target owns one normalized empty, multiple, or
@@ -572,16 +573,20 @@ described in [`runtime-architecture.md`](./runtime-architecture.md).
 
 ## Explorer And Context Menus
 
-Explorer derives its tree from the current Project snapshot, excludes `.git`
-metadata, sorts directories before files, and naturally sorts names.
+Runtime publishes one root-first, directory-first, naturally sorted flat DFS
+Project Tree after applying its visibility rules. Explorer scans that array
+directly, omits the root row, skips descendants of collapsed directories, and
+mounts only a fixed-height overscanned viewport.
 Opening a Project loads the root's direct visible children. Expanding a
 collapsed Explorer directory, disclosing a Canvas directory, or revealing a
 file loads the required direct children through the same
 Runtime-owned Project Tree. A revisioned load adds those children to the next
 complete snapshot without rescanning unrelated directories; repeated loads are
-no-ops. Creating inside a collapsed directory first loads that parent. Loaded
-directories remain watcher dependencies until the Project Session ends. There
-is no background complete-tree index or separate Canvas filesystem scan.
+no-ops. Creating inside a collapsed directory first loads that parent. A failed
+directory load remains retryable; directories that have reached loaded or error
+state remain watcher dependencies until the Project Session ends so external
+changes can recover them. There is no background complete-tree index or
+separate Canvas filesystem scan.
 Its selection model owns selected paths, focus, and range anchor. Pointer and
 keyboard behavior supports single, toggle, range, and context-menu selection,
 as well as platform-appropriate copy, cut, paste, delete, and permanent-delete
@@ -596,42 +601,37 @@ collections are not interpreted as an empty drop.
 Every platform-dependent interaction receives the required closed build
 constant; missing, Linux, or unknown defaults are not interaction states.
 
-Internal drag and drop uses the selected entry set and resolves copy or move
-against a target directory. It rejects self/descendant moves, no-op moves, and
-batch conflicts before mutation. External drops use native local paths when the
-Electron shell exposes them; browser drops create upload entries and walk
-dropped directories. Whole batches are validated before the operation begins.
+Internal drag and drop resolves the disjoint selected entry set as copy or move
+against one target directory. Runtime rejects self/descendant and otherwise
+ambiguous batches before mutation. A conflicting move or import returns an
+explicit no-side-effect conflict outcome; Web may confirm once and submit one
+overwrite attempt. External drops use native local paths only when every
+Electron entry resolves; browser drops create target-relative upload entries
+and walk dropped directories. Runtime validates whole batches before the first
+side effect.
 
 One Project Path Command model describes operations on the Project root and on
 single or multiple Project Path targets. Explorer pointer interaction, Project
 Tree keyboard shortcuts, and Canvas context menus only supply command intent;
-they do not define different command meanings. One Project-scoped intake
-authority owns admission and atomically captures the accepted binding ID and
-binding generation in an opaque command scope. Every context-menu, keyboard,
-inline-edit, drag-and-drop, and Canvas Project Path entry point must obtain that
-scope. A command effect cannot be submitted without it.
+they do not define different command meanings. One `ProjectCommandGate` owns
+admission and atomically captures the accepted binding and generation in an
+opaque command scope. Every context-menu, keyboard, inline-edit, drag-and-drop,
+and Canvas Project Path entry point submits through that scope and waits for the
+accepted Project revision before changing view intent.
 
-The intake authority does not own interaction state or command implementations.
-Explorer retains selection, clipboard, and inline-edit presentation; drag and
-drop retains `DataTransfer` and modifier interpretation; Canvas retains
-selection and camera behavior. Shared target and conflict rules remain pure
-policies. A menu and keyboard router only translates those surfaces into the
-same commands and is not an admission authority.
+The Gate does not own interaction state or command implementations. Explorer's
+single Controller retains selection, expansion, clipboard, inline-edit, load
+deduplication, conflict retry, and accepted-snapshot reconciliation; the drop
+adapter alone retains `DataTransfer` traversal and modifier interpretation;
+Canvas retains selection and camera behavior. The context-menu and focus routers
+translate surfaces into those owner operations. Filesystem mutation and native
+path access cross Runtime's validated native-file boundary, Canvas navigation
+remains Canvas-owned, and Photoshop transfer remains integration-owned. A
+generation-local Terminal request stores only its Project-relative cwd and is
+re-admitted when Terminal creates the requested session.
 
-One scoped effect boundary is the only Workbench module that invokes Runtime
-Project Path adapters. It verifies that the captured scope is still admitted at
-the instant an effect is submitted. The Workbench composition root constructs
-that boundary from the full API; the generation subtree's API type omits the raw
-Project Path adapter methods, so feature modules cannot bypass the boundary.
-Filesystem mutation and native path access then cross Runtime's validated
-native-file boundary, Canvas navigation remains Canvas-owned, and Photoshop
-transfer remains integration-owned. A context-menu Terminal request carries the
-same accepted scope through lazy feature loading and rechecks it immediately
-before Terminal creates the requested session. Project Paths remain the
-browser's normal file identity across all invocation surfaces.
-
-For one Project-backed PNG, JPEG, WebP, PSD, or AVIF file whose snapshot
-`sizeBytes` is at most 256 MiB, the shared Explorer/Canvas context menu adds
+For one Project-backed PNG, JPEG, WebP, PSD, or AVIF file whose current Canvas
+projection reports a size of at most 256 MiB, the shared context menu adds
 **Send to Photoshop** only when at least one live Photoshop session has an open
 Document. The entire submenu is absent while off, waiting, unavailable,
 unhydrated, or connected without a Document. Once visible, its bounded
@@ -706,8 +706,8 @@ The Photoshop transfer boundary is documented in
 - Settings, theme, and language: `apps/web/src/workbench/settings/`,
   `apps/web/src/workbench/services/workbenchTheme.ts`, and
   `apps/web/src/workbench/i18n/`.
-- Explorer interactions: `apps/web/src/workbench/project-explorer/` and
-  `apps/web/src/workbench/services/workbenchContextMenuCommands.ts`.
+- Explorer interactions: `apps/web/src/workbench/project-explorer/`;
+  Project Path routing: `apps/web/src/workbench/services/projectPathCommandRouter.ts`.
 - Title-bar and Web menu presentation:
   `apps/web/src/workbench/shell/`; shared semantic command protocol:
   `packages/app-protocol/src/workbenchChrome.ts`.

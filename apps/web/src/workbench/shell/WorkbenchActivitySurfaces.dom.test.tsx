@@ -32,6 +32,32 @@ const task: ActivityRecord = {
 };
 
 describe('WorkbenchActivitySurfaces', () => {
+  it('installs one anchor observer across its own measured-position update', async () => {
+    let observerCount = 0;
+    vi.stubGlobal('ResizeObserver', class {
+      constructor() {
+        observerCount += 1;
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    });
+    const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue(rect({ top: 8, bottom: 36 }));
+    const harness = createHarness();
+    harness.activities.acceptFrame({ type: 'activity.snapshot', activityRevision: 0, records: [] });
+    harness.activities.acceptFrame({ type: 'activity.upsert', activityRevision: 1, record: notice });
+
+    try {
+      await harness.render(false);
+      expect(observerCount).toBe(1);
+    } finally {
+      await harness.dispose();
+      bounds.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('renders one complete Activity Card in the Floating Stack and named Center region', async () => {
     const harness = createHarness();
     harness.activities.acceptFrame({ type: 'activity.snapshot', activityRevision: 0, records: [] });

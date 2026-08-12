@@ -143,6 +143,47 @@ describe('CanvasMinimapBar', () => {
     });
   });
 
+  it('commits Mini Map pointer navigation with the minimap origin', async () => {
+    const runtime = runtimeFixture({
+      nodes: [nodeFixture('flow/a.png', 0, 0)],
+      edges: []
+    });
+    const origins: string[] = [];
+    runtime.subscribeCamera((_camera, origin) => origins.push(origin));
+
+    await withRenderedMinimap({ runtime }, async ({ container }) => {
+      const svg = container.querySelector('.canvas-minimap-svg');
+      if (!(svg instanceof SVGSVGElement)) {
+        throw new Error('Expected Mini Map SVG');
+      }
+      Object.defineProperties(svg, {
+        getBoundingClientRect: {
+          configurable: true,
+          value: () => ({
+            left: 0,
+            top: 0,
+            width: CANVAS_MINIMAP_PANEL_SIZE.width,
+            height: CANVAS_MINIMAP_PANEL_SIZE.height
+          })
+        },
+        setPointerCapture: { configurable: true, value: () => undefined }
+      });
+      const pointerDown = new Event('pointerdown', { bubbles: true, cancelable: true });
+      Object.defineProperties(pointerDown, {
+        button: { value: 0 },
+        pointerId: { value: 7 },
+        clientX: { value: CANVAS_MINIMAP_PANEL_SIZE.width / 2 },
+        clientY: { value: CANVAS_MINIMAP_PANEL_SIZE.height / 2 }
+      });
+
+      await act(async () => {
+        svg.dispatchEvent(pointerDown);
+      });
+
+      expect(origins).toEqual(['minimap']);
+    });
+  });
+
   it('does not read or copy presented nodes after camera movement while closed', async () => {
     vi.useFakeTimers();
     const projection = {

@@ -57,6 +57,7 @@ export function createCanvasPerfBrowserAdapter(input: {
   let animationFrameId: number | undefined;
   let previousFrameTimestamp: number | undefined;
   const observedSessions = new Map<CanvasPerfSessionId, CanvasPerfObservedSession>();
+  let deferredStopEpoch = 0;
 
   const stopFrameSampler = () => {
     if (animationFrameId !== undefined && cancelFrame) {
@@ -137,9 +138,25 @@ export function createCanvasPerfBrowserAdapter(input: {
     }
   };
 
+  const cancelDeferredStop = () => {
+    deferredStopEpoch += 1;
+  };
+
+  const deferStopIfIdle = () => {
+    const epoch = ++deferredStopEpoch;
+    queueMicrotask(() => {
+      if (epoch !== deferredStopEpoch || observedSessions.size > 0) {
+        return;
+      }
+      disconnectObserver();
+      stopFrameSampler();
+    });
+  };
+
   return {
     recordEvent(event) {
       if (event.kind === 'session-start') {
+        cancelDeferredStop();
         observedSessions.set(event.sessionId, {
           sessionId: event.sessionId,
           startedAt: event.timestamp
@@ -172,8 +189,7 @@ export function createCanvasPerfBrowserAdapter(input: {
           }
         }
         if (observedSessions.size === 0) {
-          disconnectObserver();
-          stopFrameSampler();
+          deferStopIfIdle();
         }
         return;
       }
@@ -182,6 +198,7 @@ export function createCanvasPerfBrowserAdapter(input: {
       }
     },
     dispose() {
+      cancelDeferredStop();
       observedSessions.clear();
       disconnectObserver();
       stopFrameSampler();

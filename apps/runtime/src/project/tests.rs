@@ -1308,10 +1308,9 @@ impl ProjectPathStateReconciler for FailingPathStateReconciler {
     fn reconcile(
         &self,
         _canonical_root: &str,
-        command: &ProjectCommand,
-        _result: &ProjectCommandResult,
+        changes: &ProjectPathChangeSet,
     ) -> Result<(), ProjectError> {
-        if matches!(command, ProjectCommand::RenamePath { .. }) {
+        if !changes.rewrites().is_empty() {
             Err(ProjectError::service(
                 "working_copy_persistence_failed",
                 "simulated failure",
@@ -1426,6 +1425,366 @@ fn committed_path_operation_survives_working_copy_reconcile_failure() {
             .iter()
             .all(|diagnostic| diagnostic.code != "project_path_state_persistence_failed")
     );
+    drop(opened);
+    registry.close().unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn trash_partial_failure_reconciles_only_successes_in_one_revision() {
+    let (base, root, _) = fixture();
+    fs::write(root.join("first.txt"), "first").unwrap();
+    fs::write(root.join("failed.txt"), "failed").unwrap();
+    fs::write(root.join("third.txt"), "third").unwrap();
+    let home = base.join("home-partial-trash");
+    let previews = Arc::new(ProjectPreviewService::new_with_home(&home));
+    let feedback_artifacts = Arc::new(CanvasFeedbackArtifacts::new(previews.clone()).unwrap());
+    let working_copies = Arc::new(crate::workbench::WorkingCopyStore::new(&home));
+    let registry = ProjectSessionRegistry::with_change_callback_and_path_state(
+        &home,
+        Arc::new(NativeProjectNodeAdapter::new(previews)),
+        feedback_artifacts,
+        Arc::new(|| {}),
+        working_copies.clone(),
+    );
+    let canonical_root = root.canonicalize().unwrap().to_str().unwrap().to_owned();
+    for path in ["first.txt", "failed.txt", "third.txt"] {
+        working_copies
+            .put_text(
+                &canonical_root,
+                crate::workbench::TextWorkingCopy {
+                    project_relative_path: path.to_owned(),
+                    content: format!("draft {path}"),
+                    language: "plaintext".to_owned(),
+                    base_revision: "revision-1".to_owned(),
+                },
+            )
+            .unwrap();
+        working_copies
+            .put_feedback(
+                &canonical_root,
+                crate::workbench::FeedbackWorkingCopy {
+                    item_id: format!("feedback-{path}"),
+                    created_at: "2026-08-12T00:00:00Z".to_owned(),
+                    project_relative_path: path.to_owned(),
+                    kind: CanvasFeedbackItemKind::Comment,
+                    scope: CanvasFeedbackScope::Node,
+                    moment_time_seconds: None,
+                    geometry: None,
+                    comment: format!("feedback {path}"),
+                },
+            )
+            .unwrap();
+    }
+    let opened = registry
+        .open_project(&root, ProjectUseKind::Workbench)
+        .unwrap();
+    let feedback = serde_json::from_value(serde_json::json!({
+        "operation": "set-mark",
+        "projectRelativePaths": ["first.txt", "failed.txt", "third.txt"],
+        "mark": "like",
+        "selected": true
+    }))
+    .unwrap();
+    opened
+        .session
+        .execute(ProjectCommand::UpdateCanvasFeedback { input: feedback })
+        .unwrap();
+    let before = opened.session.sync_snapshot().unwrap().project_revision;
+    let mut subscription = opened.session.subscribe().unwrap();
+    assert!(matches!(
+        subscription.recv().unwrap(),
+        ProjectStreamItem::Snapshot(_)
+    ));
+    let entries = [
+        ProjectPathRef {
+            project_relative_path: "first.txt".to_owned(),
+            kind: ProjectPathKind::File,
+        },
+        ProjectPathRef {
+            project_relative_path: "failed.txt".to_owned(),
+            kind: ProjectPathKind::File,
+        },
+        ProjectPathRef {
+            project_relative_path: "third.txt".to_owned(),
+            kind: ProjectPathKind::File,
+        },
+    ];
+
+    let result = opened
+        .session
+        .trash_paths_for_test(&entries, |root, entries| {
+            fs::remove_file(root.join(&entries[0].project_relative_path))?;
+            fs::remove_file(root.join(&entries[2].project_relative_path))?;
+            Ok(vec![
+                ProjectPathBatchItemResult::ok(
+                    "first.txt".to_owned(),
+                    "first.txt".to_owned(),
+                    ProjectPathKind::File,
+                ),
+                ProjectPathBatchItemResult::failed(
+                    "failed.txt".to_owned(),
+                    ProjectPathKind::File,
+                    "permission denied".to_owned(),
+                ),
+                ProjectPathBatchItemResult::ok(
+                    "third.txt".to_owned(),
+                    "third.txt".to_owned(),
+                    ProjectPathKind::File,
+                ),
+            ])
+        })
+        .unwrap();
+
+    assert_eq!(result.project_revision, before + 1);
+    let ProjectCommandResult::PathsChanged { results, snapshot } = result.value else {
+        panic!("trash should return path results")
+    };
+    assert_eq!(results.len(), entries.len());
+    assert!(results[0].is_ok());
+    assert!(matches!(
+        results[1],
+        ProjectPathBatchItemResult::Failed { .. }
+    ));
+    assert!(results[2].is_ok());
+    assert!(
+        snapshot
+            .project_tree
+            .iter()
+            .any(|entry| entry.project_relative_path == "failed.txt")
+    );
+    assert!(snapshot.project_tree.iter().all(|entry| !matches!(
+        entry.project_relative_path.as_str(),
+        "first.txt" | "third.txt"
+    )));
+    let copies = working_copies.load(&canonical_root).unwrap();
+    assert_eq!(
+        copies.text.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["failed.txt"]
+    );
+    assert_eq!(
+        copies
+            .feedback
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["feedback-failed.txt"]
+    );
+    assert_eq!(
+        opened
+            .session
+            .canvas_feedback()
+            .unwrap()
+            .value
+            .entries
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["failed.txt"]
+    );
+    assert!(matches!(
+        subscription.recv().unwrap(),
+        ProjectStreamItem::Event(ProjectEvent {
+            project_revision,
+            change: ProjectChange::ProjectChanged(_),
+        }) if project_revision == before + 1
+    ));
+    assert_eq!(
+        subscription
+            .recv_timeout(Duration::from_millis(20))
+            .unwrap(),
+        None
+    );
+
+    drop(opened);
+    registry.close().unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn all_failed_trash_keeps_revision_and_publishes_no_event() {
+    let (base, root, registry) = fixture();
+    let opened = registry
+        .open_project(&root, ProjectUseKind::Workbench)
+        .unwrap();
+    let before = opened.session.sync_snapshot().unwrap();
+    let mut subscription = opened.session.subscribe().unwrap();
+    assert!(matches!(
+        subscription.recv().unwrap(),
+        ProjectStreamItem::Snapshot(_)
+    ));
+    let entries = [ProjectPathRef {
+        project_relative_path: "visible.txt".to_owned(),
+        kind: ProjectPathKind::File,
+    }];
+
+    let result = opened
+        .session
+        .trash_paths_for_test(&entries, |_root, _entries| {
+            Ok(vec![ProjectPathBatchItemResult::failed(
+                "visible.txt".to_owned(),
+                ProjectPathKind::File,
+                "busy".to_owned(),
+            )])
+        })
+        .unwrap();
+
+    assert_eq!(result.project_revision, before.project_revision);
+    assert!(root.join("visible.txt").is_file());
+    assert_eq!(opened.session.sync_snapshot().unwrap(), before);
+    assert_eq!(
+        subscription
+            .recv_timeout(Duration::from_millis(20))
+            .unwrap(),
+        None
+    );
+
+    drop(opened);
+    registry.close().unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn path_batch_item_result_serialization_is_a_closed_discriminated_union() {
+    assert_eq!(
+        serde_json::to_value(ProjectPathBatchItemResult::ok(
+            "before.txt".to_owned(),
+            "after.txt".to_owned(),
+            ProjectPathKind::File,
+        ))
+        .unwrap(),
+        serde_json::json!({
+            "status": "ok",
+            "sourceProjectRelativePath": "before.txt",
+            "projectRelativePath": "after.txt",
+            "kind": "file"
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(ProjectPathBatchItemResult::failed(
+            "failed.txt".to_owned(),
+            ProjectPathKind::File,
+            "permission denied".to_owned(),
+        ))
+        .unwrap(),
+        serde_json::json!({
+            "status": "failed",
+            "sourceProjectRelativePath": "failed.txt",
+            "projectRelativePath": "failed.txt",
+            "kind": "file",
+            "error": "permission denied"
+        })
+    );
+}
+
+#[test]
+fn permanent_delete_rejects_duplicate_inputs_without_an_effect() {
+    let (base, root, registry) = fixture();
+    let opened = registry
+        .open_project(&root, ProjectUseKind::Workbench)
+        .unwrap();
+    let before = opened.session.sync_snapshot().unwrap();
+    let entry = AdmittedProjectPathEntry {
+        project_relative_path: relative("visible.txt"),
+        kind: ProjectPathKind::File,
+    };
+
+    assert!(
+        opened
+            .session
+            .execute(ProjectCommand::DeletePaths {
+                entries: vec![entry.clone(), entry],
+            })
+            .is_err()
+    );
+    assert!(root.join("visible.txt").is_file());
+    assert_eq!(opened.session.sync_snapshot().unwrap(), before);
+
+    drop(opened);
+    registry.close().unwrap();
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn move_conflict_is_an_unchanged_attempt_and_overwrite_applies_once() {
+    let (base, root, registry) = fixture();
+    fs::create_dir(root.join("target")).unwrap();
+    fs::write(root.join("target/visible.txt"), "old").unwrap();
+    let opened = registry
+        .open_project(&root, ProjectUseKind::Workbench)
+        .unwrap();
+    let before = opened.session.sync_snapshot().unwrap().project_revision;
+    let mut subscription = opened.session.subscribe().unwrap();
+    assert!(matches!(
+        subscription.recv().unwrap(),
+        ProjectStreamItem::Snapshot(_)
+    ));
+    let entries = admit_project_path_entries(vec![ProjectPathRef {
+        project_relative_path: "visible.txt".to_owned(),
+        kind: ProjectPathKind::File,
+    }])
+    .unwrap();
+
+    let conflict = opened
+        .session
+        .execute(ProjectCommand::MovePaths {
+            entries: entries.clone(),
+            target_directory: ProjectDirectoryPath::parse("target").unwrap(),
+            overwrite: false,
+        })
+        .unwrap();
+    assert_eq!(conflict.project_revision, before);
+    assert!(matches!(
+        conflict.value,
+        ProjectCommandResult::PathsAttempted {
+            attempt: ProjectPathBatchAttempt::Conflict,
+            ..
+        }
+    ));
+    assert_eq!(
+        fs::read_to_string(root.join("visible.txt")).unwrap(),
+        "hello"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("target/visible.txt")).unwrap(),
+        "old"
+    );
+    assert_eq!(
+        subscription
+            .recv_timeout(Duration::from_millis(20))
+            .unwrap(),
+        None
+    );
+
+    let applied = opened
+        .session
+        .execute(ProjectCommand::MovePaths {
+            entries,
+            target_directory: ProjectDirectoryPath::parse("target").unwrap(),
+            overwrite: true,
+        })
+        .unwrap();
+    assert_eq!(applied.project_revision, before + 1);
+    assert!(matches!(
+        applied.value,
+        ProjectCommandResult::PathsAttempted {
+            attempt: ProjectPathBatchAttempt::Applied(_),
+            ..
+        }
+    ));
+    assert!(!root.join("visible.txt").exists());
+    assert_eq!(
+        fs::read_to_string(root.join("target/visible.txt")).unwrap(),
+        "hello"
+    );
+    assert!(matches!(
+        subscription.recv().unwrap(),
+        ProjectStreamItem::Event(ProjectEvent {
+            project_revision,
+            change: ProjectChange::ProjectChanged(_),
+        }) if project_revision == before + 1
+    ));
+
     drop(opened);
     registry.close().unwrap();
     fs::remove_dir_all(base).unwrap();

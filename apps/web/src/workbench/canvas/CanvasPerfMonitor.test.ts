@@ -17,7 +17,7 @@ describe('CanvasPerfMonitor', () => {
       type: 'camera-pan',
       timestamp: 100,
       source: 'CanvasSurface',
-      detail: { minimapOpen: false }
+      detail: { zoomLevel: 1 }
     });
 
     monitor.recordCounter({ timestamp: 108, source: 'CanvasStageRuntime', name: 'stage-camera-write' });

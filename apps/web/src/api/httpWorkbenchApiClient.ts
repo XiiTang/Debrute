@@ -23,6 +23,7 @@ import type {
   WorkbenchCanvasFeedbackMutationResult,
   WorkbenchProjectOpenResult,
   WorkbenchProjectTarget,
+  WorkbenchProjectFileBatchAttemptResult,
   WorkbenchProjectFileBatchOperationResult,
   WorkbenchProjectFileOperationResult,
   WorkbenchProjectTextFile,
@@ -809,7 +810,7 @@ export function createHttpWorkbenchApiClient(options: {
       name: input.name
     }),
     copyProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/copy'), input),
-    moveProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/move'), input),
+    moveProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchAttemptResult>('POST', projectPath('/files/batch/move'), input),
     copyProjectPathsToSystemClipboard: (input) => requestForCurrentProject<{ ok: true }>(
       'POST',
       '/files/path/batch/copy-to-system-clipboard',
@@ -821,8 +822,8 @@ export function createHttpWorkbenchApiClient(options: {
       input
     ),
     deleteProjectPathsPermanently: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/batch/delete-permanently'), input),
-    importExternalLocalProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchOperationResult>('POST', projectPath('/files/import/local'), input),
-    importExternalProjectUploads: (input) => requestProjectFormDataMutation<WorkbenchProjectFileBatchOperationResult>(
+    importExternalLocalProjectPaths: (input) => requestProjectMutation<WorkbenchProjectFileBatchAttemptResult>('POST', projectPath('/files/import/local'), input),
+    importExternalProjectUploads: (input) => requestProjectFormDataMutation<WorkbenchProjectFileBatchAttemptResult>(
       projectPath('/files/import/uploads'),
       uploadImportFormData(input)
     ),
@@ -970,12 +971,12 @@ function uploadImportFormData(input: WorkbenchProjectUploadImportInput): FormDat
       entry.kind === 'file'
         ? {
             kind: 'file',
-            projectRelativePath: entry.projectRelativePath,
+            relativePath: entry.relativePath,
             fileField: `file:${index}`
           }
         : {
             kind: 'directory',
-            projectRelativePath: entry.projectRelativePath
+            relativePath: entry.relativePath
           }
     )),
     ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite })

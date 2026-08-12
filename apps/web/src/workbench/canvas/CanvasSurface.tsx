@@ -75,6 +75,7 @@ import type {
 } from './runtime/CanvasEditorRuntime';
 import { createCanvasInteractionRuntime } from './runtime/CanvasInteractionRuntime';
 import { createCanvasStageRuntime, type CanvasStageRuntime } from './runtime/CanvasStageRuntime';
+import type { CanvasCameraChangeOrigin } from './runtime/canvasCamera';
 import {
   canvasNodeSelection,
   isCanvasNodeSelected,
@@ -86,6 +87,7 @@ import {
   useCanvasSurfaceSize
 } from './runtime/useCanvasRuntimeSnapshot';
 import {
+  attachCanvasCameraPerformanceBeforeRender,
   canvasActiveVideoPaths,
   canvasFeedbackBarTargetForProjectedNode,
   canvasFeedbackBarTargetForSelection,
@@ -121,7 +123,6 @@ interface CanvasSurfaceProps {
   canvasFeedback: CanvasFeedbackDocument | undefined;
   onVideoMetadata?: ((update: CanvasVideoMetadataUpdate) => void) | undefined;
   feedbackInteraction?: CanvasFeedbackCanvasBinding | undefined;
-  minimapOpen?: boolean | undefined;
   productPlatform: DebruteProductPlatform;
   cutPaths?: readonly string[] | undefined;
   onOpenContextMenu?: ((target: WorkbenchContextMenuTarget, position: WorkbenchContextMenuPosition) => void) | undefined;
@@ -139,7 +140,6 @@ export function CanvasSurface({
   canvasFeedback,
   onVideoMetadata,
   feedbackInteraction,
-  minimapOpen,
   productPlatform,
   cutPaths = [],
   onOpenContextMenu,
@@ -184,7 +184,6 @@ export function CanvasSurface({
       onVideoMetadata={onVideoMetadata}
       feedbackInteraction={feedbackInteraction}
       perfMonitor={perfMonitor}
-      minimapOpen={minimapOpen}
       productPlatform={productPlatform}
       cutPaths={cutPaths}
       onOpenContextMenu={onOpenContextMenu}
@@ -205,7 +204,6 @@ function CanvasSurfaceRuntime({
   onVideoMetadata,
   feedbackInteraction,
   perfMonitor,
-  minimapOpen,
   productPlatform,
   cutPaths = [],
   onOpenContextMenu,
@@ -239,6 +237,7 @@ function CanvasSurfaceRuntime({
   );
   const fittedCanvasRef = useRef(false);
   const canvasPerfSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
+  const canvasPerfCameraOriginRef = useRef<CanvasCameraChangeOrigin>('programmatic');
   const canvasPerfPointerInteractionSessionRef = useRef<CanvasPerfRuntimeSession | undefined>(undefined);
   const feedbackHoverSuspendedRef = useRef(false);
   const completedClickCandidateRef = useRef<CanvasCompletedClickCandidate | undefined>(undefined);
@@ -386,12 +385,45 @@ function CanvasSurfaceRuntime({
     stageRuntime,
     perfMonitor: instrumentationMonitor
   }), [instrumentationMonitor, runtime, stageRuntime]);
-  useLayoutEffect(() => renderLifecycle.attach(), [renderLifecycle]);
   const sourceResolutionRuntime = useMemo(() => createCanvasSourceResolutionRuntime({
     runtime,
     resolveCanvasSources: actions.resolveCanvasSources,
     distanceSquaredForNode: renderLifecycle.previewDistanceSquaredForNode
   }), [actions.resolveCanvasSources, renderLifecycle, runtime]);
+  const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({
+    perfMonitor: instrumentationMonitor,
+    distanceSquaredForNode: renderLifecycle.previewDistanceSquaredForNode
+  }), [instrumentationMonitor, renderLifecycle]);
+  useLayoutEffect(() => attachCanvasCameraPerformanceBeforeRender({
+    runtime,
+    renderLifecycle,
+    onCameraBeforeRender: (liveCamera, origin) => {
+      const snapshot = runtime.getSnapshot();
+      canvasPerfCameraOriginRef.current = origin;
+      syncCanvasPerfSessionState({
+        perfMonitor,
+        sessionRef: canvasPerfSessionRef,
+        snapshot: {
+          cameraState: snapshot.cameraState,
+          camera: liveCamera
+        },
+        origin,
+        getFinalState: () => canvasPerfFinalState({
+          snapshot,
+          renderSnapshot: runtime.scene.getRenderSnapshot(),
+          cullingCounts: renderLifecycle.getCullingCounts()
+        })
+      });
+      previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState(snapshot));
+      resourceZoomSettlement.observeCamera(liveCamera.z);
+    }
+  }), [
+    perfMonitor,
+    previewResourceScheduler,
+    renderLifecycle,
+    resourceZoomSettlement,
+    runtime
+  ]);
   useLayoutEffect(() => sourceResolutionRuntime.attach(), [sourceResolutionRuntime]);
   useLayoutEffect(() => {
     sourceResolutionRuntime.acceptProjection(projection, feedbackVideoResources);
@@ -403,10 +435,6 @@ function CanvasSurfaceRuntime({
       : sourceResolutionRuntime.getNode(projectRelativePath)
         ?? projectedNodesRef.current.find((node) => node.projectRelativePath === projectRelativePath);
   }, [runtime, sourceResolutionRuntime]);
-  const previewResourceScheduler = useMemo(() => createCanvasPreviewResourceScheduler({
-    perfMonitor: instrumentationMonitor,
-    distanceSquaredForNode: renderLifecycle.previewDistanceSquaredForNode
-  }), [instrumentationMonitor, renderLifecycle]);
   const renderSnapshot = useSyncExternalStore(
     runtime.scene.subscribeRenderSnapshot,
     runtime.scene.getRenderSnapshot,
@@ -503,19 +531,9 @@ function CanvasSurfaceRuntime({
     });
     if (camera) {
       fittedCanvasRef.current = true;
-      runtime.camera.setCamera(camera);
+      runtime.camera.setCamera(camera, 'programmatic');
     }
   }, [projectedNodes, runtime, surfaceSize]);
-
-  useLayoutEffect(() => runtime.subscribeCamera((liveCamera) => {
-    const snapshot = runtime.getSnapshot();
-    previewResourceScheduler.setInteractionState(canvasPreviewResourceInteractionState(snapshot));
-    resourceZoomSettlement.observeCamera(liveCamera.z);
-  }), [
-    runtime,
-    previewResourceScheduler,
-    resourceZoomSettlement
-  ]);
 
   useEffect(() => {
     return runtime.subscribeCameraState((cameraState) => {
@@ -531,7 +549,7 @@ function CanvasSurfaceRuntime({
           cameraState,
           camera: snapshot.camera
         },
-        minimapOpen: minimapOpen === true,
+        origin: canvasPerfCameraOriginRef.current,
         getFinalState: () => canvasPerfFinalState({
           snapshot,
           renderSnapshot: runtime.scene.getRenderSnapshot(),
@@ -540,7 +558,6 @@ function CanvasSurfaceRuntime({
       });
     });
   }, [
-    minimapOpen,
     perfMonitor,
     previewResourceScheduler,
     renderLifecycle,
@@ -916,14 +933,14 @@ function CanvasSurfaceRuntime({
     const selectedPaths = preserveSelection
       ? selectedNodeProjectRelativePaths(currentSelection)
       : [node.projectRelativePath];
-    const selectedEntries = selectedPaths.flatMap((path) => {
+    const selection = selectedPaths.flatMap((path) => {
       const selectedNode = currentProjectedNode(path);
       return selectedNode ? [projectPathCommandEntryForCanvasNode(selectedNode)] : [];
     });
     onOpenContextMenu?.({
       source: 'canvas',
-      invocationEntry: projectPathCommandEntryForCanvasNode(node),
-      selectedEntries
+      invocation: projectPathCommandEntryForCanvasNode(node),
+      selection
     }, {
       x: event.clientX,
       y: event.clientY

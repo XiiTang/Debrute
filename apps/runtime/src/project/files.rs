@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use super::{
     ProjectDirectoryPath, ProjectError, ProjectPathBatchItemResult, ProjectPathEntry,
-    ProjectPathKind, ProjectPathOperationStatus, ProjectRelativePath, ProjectTextFile,
+    ProjectPathKind, ProjectPathRef, ProjectRelativePath, ProjectTextFile,
     assert_project_tree_visible_mutation_path, assert_project_tree_visible_path,
     normalize_project_path_basename, project_content_hash, rename_no_replace, replace_file,
     resolve_no_symlink_existing_project_path, resolve_project_path, resolve_project_path_for_write,
@@ -52,6 +52,12 @@ pub enum ProjectUploadEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectPathBatchAttempt {
+    Applied(Vec<ProjectPathBatchItemResult>),
+    Conflict,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct AdmittedProjectPathEntry {
     pub(crate) project_relative_path: ProjectRelativePath,
@@ -59,7 +65,7 @@ pub struct AdmittedProjectPathEntry {
 }
 
 pub(crate) fn admit_project_path_entries(
-    entries: Vec<ProjectPathEntry>,
+    entries: Vec<ProjectPathRef>,
 ) -> Result<Vec<AdmittedProjectPathEntry>, ProjectError> {
     entries
         .into_iter()
@@ -281,7 +287,7 @@ pub(crate) fn copy_project_paths(
     target_directory: &ProjectDirectoryPath,
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
     assert_directory(root, target_directory)?;
-    let entries = normalized_top_level_entries(root, entries)?;
+    let entries = validate_disjoint_entries(root, entries)?;
     for entry in &entries {
         if entry.kind == ProjectPathKind::Directory
             && is_same_or_child(target_directory, &entry.project_relative_path)
@@ -322,11 +328,12 @@ pub(crate) fn copy_project_paths(
     commit_copied_paths(&staged, false)?;
     Ok(planned
         .into_iter()
-        .map(|(entry, target)| ProjectPathBatchItemResult {
-            source_project_relative_path: entry.project_relative_path.into_string(),
-            project_relative_path: target.into_string(),
-            kind: entry.kind,
-            status: ProjectPathOperationStatus::Ok,
+        .map(|(entry, target)| {
+            ProjectPathBatchItemResult::ok(
+                entry.project_relative_path.into_string(),
+                target.into_string(),
+                entry.kind,
+            )
         })
         .collect())
 }
@@ -334,17 +341,19 @@ pub(crate) fn copy_project_paths(
 /// Moves normalized top-level Project paths into one existing directory.
 ///
 /// # Errors
-/// Returns an error for invalid batches, recursive moves, collisions, or I/O failure.
+/// Returns an error for invalid batches, recursive moves, or I/O failure.
+/// A destination collision without overwrite is an effect-free attempt result.
 pub(crate) fn move_project_paths(
     root: &Path,
     entries: &[AdmittedProjectPathEntry],
     target_directory: &ProjectDirectoryPath,
     overwrite: bool,
-) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
+) -> Result<ProjectPathBatchAttempt, ProjectError> {
     assert_directory(root, target_directory)?;
-    let entries = normalized_top_level_entries(root, entries)?;
+    let entries = validate_disjoint_entries(root, entries)?;
     let mut targets = HashSet::new();
     let mut planned = Vec::new();
+    let mut conflict = false;
     for entry in entries {
         let basename = entry
             .project_relative_path
@@ -367,11 +376,12 @@ pub(crate) fn move_project_paths(
         }
         let skipped = entry.project_relative_path.parent() == *target_directory;
         if !skipped && resolve_project_path_for_write(root, &target)?.exists() && !overwrite {
-            return Err(ProjectError::Validation(format!(
-                "Project path already exists: {target}"
-            )));
+            conflict = true;
         }
         planned.push((entry, target, skipped));
+    }
+    if conflict {
+        return Ok(ProjectPathBatchAttempt::Conflict);
     }
     let moves = planned
         .iter()
@@ -387,23 +397,25 @@ pub(crate) fn move_project_paths(
         })
         .collect::<Result<Vec<_>, ProjectError>>()?;
     commit_moved_paths(&moves, overwrite)?;
-    Ok(planned
-        .into_iter()
-        .map(|(entry, target, skipped)| ProjectPathBatchItemResult {
-            source_project_relative_path: entry.project_relative_path.to_string(),
-            project_relative_path: if skipped {
-                entry.project_relative_path.into_string()
-            } else {
-                target.into_string()
-            },
-            kind: entry.kind,
-            status: if skipped {
-                ProjectPathOperationStatus::Skipped
-            } else {
-                ProjectPathOperationStatus::Ok
-            },
-        })
-        .collect())
+    Ok(ProjectPathBatchAttempt::Applied(
+        planned
+            .into_iter()
+            .map(|(entry, target, skipped)| {
+                if skipped {
+                    ProjectPathBatchItemResult::skipped(
+                        entry.project_relative_path.into_string(),
+                        entry.kind,
+                    )
+                } else {
+                    ProjectPathBatchItemResult::ok(
+                        entry.project_relative_path.into_string(),
+                        target.into_string(),
+                        entry.kind,
+                    )
+                }
+            })
+            .collect(),
+    ))
 }
 
 /// Deletes a validated batch of visible Project paths.
@@ -414,7 +426,7 @@ pub(crate) fn delete_project_paths(
     root: &Path,
     entries: &[AdmittedProjectPathEntry],
 ) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
-    let entries = normalized_top_level_entries(root, entries)?;
+    let entries = validate_disjoint_entries(root, entries)?;
     for entry in &entries {
         resolve_no_symlink_existing_project_path(
             root,
@@ -433,11 +445,9 @@ pub(crate) fn delete_project_paths(
     commit_deleted_paths(&targets)?;
     Ok(entries
         .into_iter()
-        .map(|entry| ProjectPathBatchItemResult {
-            source_project_relative_path: entry.project_relative_path.to_string(),
-            project_relative_path: entry.project_relative_path.into_string(),
-            kind: entry.kind,
-            status: ProjectPathOperationStatus::Ok,
+        .map(|entry| {
+            let path = entry.project_relative_path.into_string();
+            ProjectPathBatchItemResult::ok(path.clone(), path, entry.kind)
         })
         .collect())
 }
@@ -445,17 +455,19 @@ pub(crate) fn delete_project_paths(
 /// Imports fully validated local files or directories into a Project.
 ///
 /// # Errors
-/// Returns an error for invalid sources, symbolic links, collisions, or copy failure.
+/// Returns an error for invalid sources, symbolic links, or copy failure.
+/// A destination collision without overwrite is an effect-free attempt result.
 pub(crate) fn import_local_project_paths(
     root: &Path,
     sources: &[PathBuf],
     target_directory: &ProjectDirectoryPath,
     overwrite: bool,
-) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
+) -> Result<ProjectPathBatchAttempt, ProjectError> {
     assert_directory(root, target_directory)?;
     let root_real = root.canonicalize()?;
     let mut targets = HashSet::new();
     let mut planned = Vec::new();
+    let mut conflict = false;
     for source in sources {
         if !source.is_absolute() {
             return Err(ProjectError::Validation(format!(
@@ -506,11 +518,9 @@ pub(crate) fn import_local_project_paths(
         }
         if target_absolute.exists() {
             if !overwrite {
-                return Err(ProjectError::Validation(format!(
-                    "Project path already exists: {target}"
-                )));
+                conflict = true;
             }
-            if target_absolute.canonicalize()? == source_real {
+            if overwrite && target_absolute.canonicalize()? == source_real {
                 return Err(ProjectError::Validation(format!(
                     "External source path resolves to its project import target: {target}"
                 )));
@@ -527,6 +537,9 @@ pub(crate) fn import_local_project_paths(
         }
         planned.push((source.clone(), target, kind));
     }
+    if conflict {
+        return Ok(ProjectPathBatchAttempt::Conflict);
+    }
     let staged = planned
         .iter()
         .map(|(source, target, _)| {
@@ -537,27 +550,31 @@ pub(crate) fn import_local_project_paths(
         })
         .collect::<Result<Vec<_>, ProjectError>>()?;
     commit_copied_paths(&staged, overwrite)?;
-    Ok(planned
-        .into_iter()
-        .map(|(source, target, kind)| ProjectPathBatchItemResult {
-            source_project_relative_path: source.to_string_lossy().into_owned(),
-            project_relative_path: target.into_string(),
-            kind,
-            status: ProjectPathOperationStatus::Ok,
-        })
-        .collect())
+    Ok(ProjectPathBatchAttempt::Applied(
+        planned
+            .into_iter()
+            .map(|(source, target, kind)| {
+                ProjectPathBatchItemResult::ok(
+                    source.to_string_lossy().into_owned(),
+                    target.into_string(),
+                    kind,
+                )
+            })
+            .collect(),
+    ))
 }
 
 /// Materializes a validated relative upload manifest inside a Project.
 ///
 /// # Errors
-/// Returns an error for invalid manifests, collisions, or atomic-write failure.
+/// Returns an error for invalid manifests or atomic-write failure.
+/// A destination collision without overwrite is an effect-free attempt result.
 pub(crate) fn import_upload_project_entries(
     root: &Path,
     entries: &[ProjectUploadEntry],
     target_directory: &ProjectDirectoryPath,
     overwrite: bool,
-) -> Result<Vec<ProjectPathBatchItemResult>, ProjectError> {
+) -> Result<ProjectPathBatchAttempt, ProjectError> {
     assert_directory(root, target_directory)?;
     let mut targets = HashSet::new();
     let mut planned = Vec::new();
@@ -603,27 +620,26 @@ pub(crate) fn import_upload_project_entries(
         .iter()
         .map(|(_, path, _)| upload_top_level(target_directory, path))
         .collect::<Result<_, _>>()?;
+    let mut conflict = false;
     for target in &top_level {
         if resolve_project_path_for_write(root, target)?.exists() && !overwrite {
-            return Err(ProjectError::Validation(format!(
-                "Project path already exists: {target}"
-            )));
+            conflict = true;
         }
+    }
+    if conflict {
+        return Ok(ProjectPathBatchAttempt::Conflict);
     }
     let staged = stage_upload_entries(root, target_directory, &planned, &top_level)?;
     commit_staged_paths(&staged, overwrite)?;
-    Ok(planned
-        .into_iter()
-        .map(|(_, path, kind)| {
-            let path = path.into_string();
-            ProjectPathBatchItemResult {
-                source_project_relative_path: path.clone(),
-                project_relative_path: path,
-                kind,
-                status: ProjectPathOperationStatus::Ok,
-            }
-        })
-        .collect())
+    Ok(ProjectPathBatchAttempt::Applied(
+        planned
+            .into_iter()
+            .map(|(_, path, kind)| {
+                let path = path.into_string();
+                ProjectPathBatchItemResult::ok(path.clone(), path, kind)
+            })
+            .collect(),
+    ))
 }
 
 fn stage_upload_entries(
@@ -1032,7 +1048,7 @@ fn cleanup_paths<'a>(paths: impl IntoIterator<Item = &'a PathBuf>) {
     }
 }
 
-fn normalized_top_level_entries(
+fn validate_disjoint_entries(
     root: &Path,
     entries: &[AdmittedProjectPathEntry],
 ) -> Result<Vec<AdmittedProjectPathEntry>, ProjectError> {
@@ -1041,7 +1057,9 @@ fn normalized_top_level_entries(
     for entry in entries {
         let path = &entry.project_relative_path;
         if !seen.insert(path.clone()) {
-            continue;
+            return Err(ProjectError::Validation(format!(
+                "Duplicate Project path in batch: {path}"
+            )));
         }
         if !super::is_project_visible_path(path) {
             return Err(ProjectError::Validation(format!(
@@ -1059,25 +1077,23 @@ fn normalized_top_level_entries(
             kind,
         });
     }
-    let mut top_level = Vec::<AdmittedProjectPathEntry>::new();
-    for entry in normalized {
-        if top_level.iter().any(|candidate| {
-            is_same_or_child(
+    for (index, entry) in normalized.iter().enumerate() {
+        for candidate in &normalized[index + 1..] {
+            if is_same_or_child(
                 &entry.project_relative_path,
                 &candidate.project_relative_path,
-            )
-        }) {
-            continue;
+            ) || is_same_or_child(
+                &candidate.project_relative_path,
+                &entry.project_relative_path,
+            ) {
+                return Err(ProjectError::Validation(format!(
+                    "Project batch must not contain both an ancestor and descendant: {}, {}",
+                    entry.project_relative_path, candidate.project_relative_path
+                )));
+            }
         }
-        top_level.retain(|candidate| {
-            !is_same_or_child(
-                &candidate.project_relative_path,
-                &entry.project_relative_path,
-            )
-        });
-        top_level.push(entry);
     }
-    Ok(top_level)
+    Ok(normalized)
 }
 
 fn project_path_kind(

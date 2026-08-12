@@ -11,14 +11,13 @@ import {
 import { createWorkbenchProjectProjection } from './WorkbenchProjectProjection';
 
 describe('Project binding lifecycle', () => {
-  it('closes command admission synchronously, admits one attempt, and commits only an accepted binding', async () => {
+  it('closes admission synchronously, ignores a concurrent open, and commits an accepted binding', async () => {
     const projection = createWorkbenchProjectProjection();
     projection.acceptBoundProject(projectResult('project-a'));
     const pending = deferred<WorkbenchProjectOpenResult>();
     let lifecycle!: ProjectBindingLifecycle;
     const openProject = vi.fn<WorkbenchApiClient['openProject']>(() => {
       expect(lifecycle.getState()).toEqual({ opening: true });
-      expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(false);
       return pending.promise;
     });
     const commitProjectRoute = vi.fn();
@@ -30,57 +29,39 @@ describe('Project binding lifecycle', () => {
 
     const opening = lifecycle.open({ projectRoot: '/projects/b' });
 
+    await expect(lifecycle.open({ projectRoot: '/projects/c' })).resolves.toBeUndefined();
     expect(openProject).toHaveBeenCalledTimes(1);
-    expect(commitProjectRoute).not.toHaveBeenCalled();
-    await expect(lifecycle.open({ projectRoot: '/projects/c' })).resolves.toEqual({
-      outcome: 'ignored_while_opening'
-    });
-    expect(openProject).toHaveBeenCalledTimes(1);
-
     const accepted = projectResult('project-b');
     projection.acceptBoundProject(accepted);
     pending.resolve(accepted);
 
-    await expect(opening).resolves.toEqual({
-      outcome: 'bound',
-      bindingId: 'project-b',
-      canonicalRoot: '/projects/project-b',
-      generation: 2
-    });
+    await expect(opening).resolves.toBeUndefined();
     expect(commitProjectRoute).toHaveBeenCalledWith('/projects/project-b');
     expect(lifecycle.getState()).toEqual({ opening: false });
-    expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(false);
-    expect(lifecycle.canAcceptProjectPathCommand(2)).toBe(true);
   });
 
-  it('restores the unchanged binding after a failed attempt', async () => {
+  it('rejects only a real failure of the current open intent', async () => {
     const projection = createWorkbenchProjectProjection();
     projection.acceptBoundProject(projectResult('project-a'));
     const failure = new Error('B could not be prepared.');
-    const commitProjectRoute = vi.fn();
     const lifecycle = createProjectBindingLifecycle({
       openProject: vi.fn<WorkbenchApiClient['openProject']>(async () => {
         throw failure;
       }),
       projectProjection: projection,
-      commitProjectRoute
+      commitProjectRoute: vi.fn()
     });
 
-    await expect(lifecycle.open({ projectRoot: '/projects/b' })).resolves.toEqual({
-      outcome: 'failed',
-      error: failure
-    });
+    await expect(lifecycle.open({ projectRoot: '/projects/b' })).rejects.toBe(failure);
     expect(projection.getState()).toMatchObject({
       status: 'bound',
       bindingId: 'project-a',
       generation: 1
     });
     expect(lifecycle.getState()).toEqual({ opening: false });
-    expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(true);
-    expect(commitProjectRoute).not.toHaveBeenCalled();
   });
 
-  it('keeps the requesting binding and route when Runtime focuses an existing Desktop', async () => {
+  it('resolves when Runtime focuses an existing Desktop', async () => {
     const projection = createWorkbenchProjectProjection();
     projection.acceptBoundProject(projectResult('project-a'));
     const commitProjectRoute = vi.fn();
@@ -93,20 +74,11 @@ describe('Project binding lifecycle', () => {
       commitProjectRoute
     });
 
-    await expect(lifecycle.open({ projectRoot: '/projects/b' })).resolves.toEqual({
-      outcome: 'focused_existing_desktop',
-      canonicalRoot: '/projects/b'
-    });
-    expect(projection.getState()).toMatchObject({
-      status: 'bound',
-      bindingId: 'project-a',
-      generation: 1
-    });
-    expect(lifecycle.canAcceptProjectPathCommand(1)).toBe(true);
+    await expect(lifecycle.open({ projectRoot: '/projects/b' })).resolves.toBeUndefined();
     expect(commitProjectRoute).not.toHaveBeenCalled();
   });
 
-  it('does not let an obsolete attempt overwrite the current binding or route', async () => {
+  it('silently discards a failure from an intent superseded by another binding', async () => {
     const projection = createWorkbenchProjectProjection();
     projection.acceptBoundProject(projectResult('project-a'));
     const pending = deferred<WorkbenchProjectOpenResult>();
@@ -121,13 +93,12 @@ describe('Project binding lifecycle', () => {
     projection.acceptBoundProject(projectResult('project-c'));
     pending.reject(new Error('late B failure'));
 
-    await expect(obsolete).resolves.toEqual({ outcome: 'superseded' });
+    await expect(obsolete).resolves.toBeUndefined();
     expect(projection.getState()).toMatchObject({
       status: 'bound',
       bindingId: 'project-c',
       generation: 2
     });
-    expect(lifecycle.canAcceptProjectPathCommand(2)).toBe(true);
     expect(commitProjectRoute).not.toHaveBeenCalled();
   });
 });

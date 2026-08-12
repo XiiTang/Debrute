@@ -31,7 +31,10 @@ export interface WorkbenchProjectProjection {
   acceptProjectEvent(event: WorkbenchEvent): void;
   detachProject(bindingId: string): void;
   endConnection(error: Error): void;
-  waitForRevision(generation: number, projectRevision: number): Promise<void>;
+  waitForRevision(
+    generation: number,
+    projectRevision: number
+  ): Promise<WorkbenchProjectSessionSnapshot>;
 }
 
 export function createWorkbenchProjectProjection(): WorkbenchProjectProjection {
@@ -40,7 +43,7 @@ export function createWorkbenchProjectProjection(): WorkbenchProjectProjection {
   const revisionWaiters = new Set<{
     generation: number;
     projectRevision: number;
-    resolve(): void;
+    resolve(snapshot: WorkbenchProjectSessionSnapshot): void;
     reject(error: Error): void;
   }>();
 
@@ -50,7 +53,7 @@ export function createWorkbenchProjectProjection(): WorkbenchProjectProjection {
       if (state.status === 'bound' && state.generation === waiter.generation) {
         if (state.projectRevision >= waiter.projectRevision) {
           revisionWaiters.delete(waiter);
-          waiter.resolve();
+          waiter.resolve(state.snapshot);
         }
       } else {
         revisionWaiters.delete(waiter);
@@ -123,9 +126,9 @@ export function createWorkbenchProjectProjection(): WorkbenchProjectProjection {
         return Promise.reject(new Error(`Project binding generation ${generation} is not current.`));
       }
       if (state.projectRevision >= projectRevision) {
-        return Promise.resolve();
+        return Promise.resolve(state.snapshot);
       }
-      return new Promise<void>((resolve, reject) => {
+      return new Promise<WorkbenchProjectSessionSnapshot>((resolve, reject) => {
         revisionWaiters.add({ generation, projectRevision, resolve, reject });
       });
     }

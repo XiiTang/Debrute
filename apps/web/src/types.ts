@@ -20,7 +20,6 @@ import type {
 } from '@debrute/app-protocol';
 import type { CanvasFeedbackDocument } from '@debrute/app-protocol';
 import type { CanvasProjection } from './workbench/canvas/CanvasScene';
-import type { ProjectTreeSelectionState } from './workbench/project-explorer/projectTreeInteraction';
 import type { WorkbenchResolvedTheme } from './workbench/services/workbenchTheme';
 import type { WorkbenchTitleBarState } from './workbench/shell/workbenchTitleBarState';
 
@@ -36,7 +35,6 @@ export interface WorkbenchState {
   titleBarState: WorkbenchTitleBarState;
   resolvedTheme: WorkbenchResolvedTheme;
   projectOpen: ProjectOpenState;
-  explorerSelection: ProjectTreeSelectionState;
   photoshop: EventProjection<PhotoshopStateView>;
   canvasFeedback: CanvasFeedbackDocument | undefined;
   textFileBuffers: Record<string, TextFileBuffer>;

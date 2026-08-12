@@ -1,63 +1,52 @@
-.db-tree-row {
-  width: 100%;
-  min-height: 26px;
+.project-tree-shell {
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.project-tree {
+  --tree-indent-step: 14px;
+  --tree-row-left-offset: 6px;
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  padding: 0 4px;
+  overflow: auto;
+  outline: none;
+}
+
+.project-tree.drag-over {
+  background: color-mix(in srgb, var(--db-selection) 32%, transparent);
+}
+
+.project-tree-spacer {
+  width: 1px;
+  pointer-events: none;
+}
+
+.project-tree-row,
+.project-tree-edit-row {
+  position: absolute;
+  top: 0;
+  left: 4px;
+  right: 4px;
+  height: var(--project-tree-row-height);
+  display: grid;
+  grid-template-columns: 12px 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px 0 calc(var(--tree-row-left-offset) + var(--tree-indent));
+  overflow: visible;
   border: 0;
   border-radius: var(--db-radius-md);
   background: transparent;
   color: var(--db-text);
   cursor: pointer;
-}
-
-.db-tree-row:hover {
-  background: var(--db-surface-2);
-}
-
-.db-tree-row.selected {
-  background: var(--db-selection);
-  box-shadow: inset 3px 0 0 var(--db-brand-clay);
-}
-
-.db-tree-row.focused {
-  outline: 2px solid var(--db-focus);
-  outline-offset: -2px;
-}
-
-.db-tree-row.drag-over {
-  background: var(--db-selection);
-}
-
-.db-tree-row.cut {
-  opacity: 0.5;
-}
-
-.project-tree-shell {
-  min-height: 0;
-  height: 100%;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-}
-
-.project-tree {
-  --tree-indent-step: 14px;
-  --tree-guide-left-offset: 14px;
-  --tree-row-left-offset: 6px;
-  min-height: 0;
-  height: 100%;
-  padding: 0 4px 10px;
-  overflow: auto;
-}
-
-.project-tree-row {
-  position: relative;
-  min-height: 24px;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  padding: 0 8px 0 calc(var(--tree-row-left-offset) + var(--tree-indent));
-  overflow: hidden;
   text-align: left;
   font-size: var(--db-font-sm);
+  box-sizing: border-box;
+  contain: layout;
+  will-change: transform;
 }
 
 .project-tree-row::before,
@@ -66,7 +55,7 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: var(--tree-guide-left-offset);
+  left: 14px;
   width: var(--tree-indent);
   pointer-events: none;
   background-image: repeating-linear-gradient(
@@ -78,12 +67,53 @@
   );
 }
 
+.project-tree-row:hover {
+  background: var(--db-surface-2);
+}
+
+.project-tree-row.selected {
+  background: var(--db-selection);
+  box-shadow: inset 3px 0 0 var(--db-brand-clay);
+}
+
+.project-tree-row.focused {
+  outline: 2px solid var(--db-focus);
+  outline-offset: -2px;
+}
+
+.project-tree-row.drag-over {
+  background: var(--db-selection);
+}
+
+.project-tree-row.cut {
+  opacity: 0.5;
+}
+
+.project-tree-row.error {
+  box-shadow: inset -2px 0 0 var(--db-danger);
+}
+
 .project-tree-row svg,
 .project-tree-edit-row svg {
   color: var(--db-text-subtle);
 }
 
-.project-tree-row span:last-child {
+.project-tree-disclosure {
+  width: 12px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+}
+
+.project-tree-disclosure svg {
+  transition: transform 100ms ease;
+}
+
+.project-tree-disclosure.expanded svg {
+  transform: rotate(90deg);
+}
+
+.project-tree-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -91,14 +121,14 @@
 }
 
 .project-tree-edit-row {
+  cursor: text;
+  z-index: 2;
+}
+
+.project-tree-edit-control {
   position: relative;
-  min-height: 28px;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  padding: 0 8px 0 calc(var(--tree-row-left-offset) + var(--tree-indent));
-  overflow: hidden;
+  min-width: 0;
+  width: 100%;
 }
 
 .project-tree-edit-input {
@@ -108,10 +138,37 @@
   font-size: 12px;
 }
 
-.project-tree-edit-row small,
-.project-tree-row small {
-  grid-column: 2;
+.project-tree-edit-error {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 2px);
+  left: 0;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 3px 6px;
+  border-radius: var(--db-radius-sm);
+  background: var(--db-surface-1);
+  box-shadow: 2px 2px 0 var(--db-danger);
   color: var(--db-danger);
   font-size: 11px;
   line-height: 16px;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.project-tree-accessible-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.project-tree-empty {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }

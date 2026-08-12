@@ -844,7 +844,7 @@ mod tests {
                 .resolve_image_preview_lease(&lease, 4, &PreviewCancellation::default())
                 .unwrap_err()
                 .code(),
-            "canvas_source_changed"
+            "project_file_source_changed"
         );
         fs::remove_dir_all(root).unwrap();
     }

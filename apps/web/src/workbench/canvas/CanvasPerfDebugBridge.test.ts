@@ -287,7 +287,18 @@ describe('CanvasPerfDebugBridge', () => {
         name: 'debrute:canvas:test',
         detail: { reason: 'initial' }
       }],
-      sessions: []
+      sessions: [{
+        sessionId: 'camera-zoom:1',
+        type: 'camera-zoom',
+        durationMs: 1,
+        frameIntervalCount: 0,
+        p50FrameIntervalMs: 0,
+        p95FrameIntervalMs: 0,
+        p99FrameIntervalMs: 0,
+        minFrameIntervalMs: 0,
+        maxFrameIntervalMs: 0,
+        counters: {}
+      }]
     };
     const first = bridge.api.exportCapture();
     fakeMonitor.trace.events.push({
@@ -300,6 +311,7 @@ describe('CanvasPerfDebugBridge', () => {
     const second = bridge.api.exportCapture();
 
     expect(first.trace.events).toHaveLength(1);
+    expect(first.trace.sessions[0]?.type).toBe('camera-zoom');
     expect(second.trace.events).toHaveLength(2);
     expect(() => JSON.stringify(second)).not.toThrow();
     expect(JSON.stringify(second)).not.toContain('[object Map]');

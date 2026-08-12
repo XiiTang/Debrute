@@ -11,12 +11,10 @@ const pageEntry = entries.find(([, value]) => value.isEntry)?.[0];
 const workbenchEntry = 'src/workbench/WorkbenchApp.tsx';
 const textEditorFeature = 'src/workbench/canvas/FloatingTextEditorWindowFeature.tsx';
 const textEditorEngine = 'src/workbench/canvas/CanvasTextEditor.tsx';
-const explorerFeature = 'src/workbench/project-explorer/ExplorerPanelFeature.tsx';
+const explorerPresentation = 'src/workbench/project-explorer/ProjectTree.tsx';
 const inspectorFeature = 'src/workbench/inspector/InspectorPanelFeature.tsx';
-const explorerController = 'src/workbench/project-explorer/useProjectExplorerController.ts';
 const terminalHub = 'src/api/terminalHubClient.ts';
 const workbenchSource = readFileSync(resolve(repositoryRoot, 'apps/web/src/workbench/WorkbenchApp.tsx'), 'utf8');
-const explorerFeatureSource = readFileSync(resolve(repositoryRoot, 'apps/web', explorerFeature), 'utf8');
 
 if (!pageEntry || !manifest[workbenchEntry]) {
   throw new Error('Workbench build manifest is missing its page or application entry.');
@@ -92,26 +90,20 @@ const SHELL_FONT_BUDGET = 18 * 1024 * 1024;
 requireDynamicBoundary('src/workbench/terminal/TerminalPanel.tsx');
 requireDynamicBoundary('src/workbench/canvas/CanvasVideoPlayerAdapter.tsx');
 requireDynamicBoundary('src/workbench/settings/SettingsFeature.tsx');
-requireDynamicBoundary(explorerFeature);
+requireDynamicBoundary(explorerPresentation);
 requireDynamicBoundary(inspectorFeature);
 requireDynamicBoundary(textEditorFeature);
 requireDynamicBoundary(textEditorEngine);
-requireDynamicStyles(explorerFeature);
 requireDynamicStyles(inspectorFeature);
+requireDynamicStyles(explorerPresentation);
 requireDynamicStyles('src/workbench/settings/SettingsFeature.tsx');
 requireDynamicStyles('src/workbench/terminal/TerminalPanel.tsx');
 requireDynamicBoundaryFromGraph([pageEntry], terminalHub);
-if (staticGraph([workbenchEntry]).has(explorerController)) {
-  throw new Error('Explorer controller returned to the Workbench critical graph.');
-}
 if (staticGraph([pageEntry]).has(terminalHub)) {
   throw new Error('Terminal Hub returned to the Workbench critical graph.');
 }
-if (workbenchSource.includes('useProjectExplorerController(')) {
-  throw new Error('Workbench eagerly invokes the Explorer controller.');
-}
-if (!explorerFeatureSource.includes('useProjectExplorerController(input)')) {
-  throw new Error('Explorer feature no longer owns its intent-activated controller.');
+if (!workbenchSource.includes('useProjectExplorerController({')) {
+  throw new Error('Workbench no longer directly owns the Explorer controller.');
 }
 if (!(manifest[textEditorEngine].dynamicImports ?? []).some((source) => source.includes('@codemirror+lang-'))) {
   throw new Error('CodeMirror language parsers are no longer loaded on demand.');

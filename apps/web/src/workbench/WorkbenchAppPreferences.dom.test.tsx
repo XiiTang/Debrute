@@ -579,9 +579,9 @@ describe('WorkbenchApp preferences and project behavior', () => {
       requireButton(container, 'Explorer').click();
       await Promise.resolve();
     });
-    await waitForButton(container, 'assets');
+    const assets = await waitForTreeItem(container, 'assets');
     await act(async () => {
-      requireButton(container, 'assets').click();
+      assets.click();
       await Promise.resolve();
     });
 
@@ -627,6 +627,23 @@ describe('WorkbenchApp preferences and project behavior', () => {
 
       await unmount(root, container);
     });
+  });
+
+  it('does not recursively cancel an absent Explorer edit while the initial Project opens', async () => {
+    vi.spyOn(console, 'error').mockImplementation((message: unknown, ...details: unknown[]) => {
+      if (String(message).includes('Maximum update depth exceeded')) {
+        throw new Error(`Captured React update loop: ${String(message)} ${details.join(' ')}`);
+      }
+    });
+    const { container, root } = await renderWorkbenchApp('/open?path=%2Fprojects%2Fproject-1');
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(console.error).not.toHaveBeenCalled();
+    await unmount(root, container);
   });
 
   it('replaces the Project-scoped event subscription when the initial generation opens', async () => {
@@ -1173,6 +1190,21 @@ async function waitForButton(container: HTMLElement, label: string): Promise<HTM
     });
   }
   throw new Error(`Expected ${label} button.`);
+}
+
+async function waitForTreeItem(container: HTMLElement, label: string): Promise<HTMLElement> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const item = Array.from(container.querySelectorAll<HTMLElement>('[role="treeitem"]'))
+      .find((candidate) => candidate.textContent?.includes(label));
+    if (item) {
+      return item;
+    }
+    await act(async () => {
+      await Promise.resolve();
+      await new Promise((resolve) => window.setTimeout(resolve, 10));
+    });
+  }
+  throw new Error(`Expected ${label} tree item.`);
 }
 
 function findButton(container: HTMLElement, label: string): HTMLButtonElement | undefined {

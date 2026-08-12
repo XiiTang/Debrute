@@ -17,10 +17,11 @@ import type { DebruteCanvasPerfCanvasSnapshot } from './CanvasPerfDebugBridge';
 import {
   type CanvasPerfFinalState,
   type CanvasPerfMonitor,
-  type CanvasPerfSessionId
+  type CanvasPerfSessionId,
+  type CanvasPerfSessionType
 } from './CanvasPerfMonitor';
 import type { CanvasSceneSnapshot } from './CanvasScenePresentation';
-import type { CanvasCamera } from './runtime/canvasCamera';
+import type { CanvasCamera, CanvasCameraChangeOrigin } from './runtime/canvasCamera';
 import type { CanvasPreviewResourceInteractionState } from './CanvasPreviewResourceScheduler';
 import type { CanvasCullingCounts } from './CanvasCullingController';
 import type { CanvasRenderLifecycle } from './CanvasRenderLifecycle';
@@ -45,6 +46,7 @@ export function isCanvasPrimaryPointerEvent(
 
 export interface CanvasPerfRuntimeSession {
   sessionId: CanvasPerfSessionId;
+  sessionType: CanvasPerfSessionType;
   pointerInteractionActivated?: boolean | undefined;
 }
 
@@ -56,34 +58,44 @@ export interface CanvasPerfDebugSnapshotContext {
   surfaceElement: HTMLElement | null;
 }
 
+export function attachCanvasCameraPerformanceBeforeRender(input: {
+  runtime: Pick<CanvasEditorRuntime, 'subscribeCamera'>;
+  renderLifecycle: Pick<CanvasRenderLifecycle, 'attach'>;
+  onCameraBeforeRender(camera: CanvasCamera, origin: CanvasCameraChangeOrigin): void;
+}): () => void {
+  const unsubscribeCamera = input.runtime.subscribeCamera(input.onCameraBeforeRender);
+  let detachRenderLifecycle: () => void;
+  try {
+    detachRenderLifecycle = input.renderLifecycle.attach();
+  } catch (error) {
+    unsubscribeCamera();
+    throw error;
+  }
+  return () => {
+    detachRenderLifecycle();
+    unsubscribeCamera();
+  };
+}
+
 export function syncCanvasPerfSessionState(input: {
   perfMonitor: CanvasPerfMonitor | undefined;
   sessionRef: { current: CanvasPerfRuntimeSession | undefined };
   snapshot: Pick<CanvasRuntimeSnapshot, 'cameraState' | 'camera'>;
-  minimapOpen: boolean;
+  origin: CanvasCameraChangeOrigin;
   getFinalState?: (() => Partial<CanvasPerfFinalState>) | undefined;
 }): void {
   const perfMonitor = input.perfMonitor;
   if (!perfMonitor) {
     return;
   }
-  const timestamp = canvasPerfTimestamp();
-  if (input.snapshot.cameraState === 'moving') {
-    if (!input.sessionRef.current) {
-      const sessionId = perfMonitor.startSession({
-        type: input.minimapOpen ? 'camera-minimap' : 'camera-pan',
-        timestamp,
-        source: 'CanvasSurface',
-        detail: {
-          minimapOpen: input.minimapOpen,
-          zoomLevel: input.snapshot.camera.z
-        }
-      });
-      input.sessionRef.current = { sessionId };
-    }
+  const sessionType = input.snapshot.cameraState === 'moving'
+    ? canvasPerfCameraSessionType(input.origin)
+    : undefined;
+  const session = input.sessionRef.current;
+  if (session?.sessionType === sessionType || (!session && !sessionType)) {
     return;
   }
-  const session = input.sessionRef.current;
+  const timestamp = canvasPerfTimestamp();
   if (session) {
     perfMonitor.endSession({
       sessionId: session.sessionId,
@@ -96,6 +108,15 @@ export function syncCanvasPerfSessionState(input: {
       }
     });
     input.sessionRef.current = undefined;
+  }
+  if (sessionType) {
+    const sessionId = perfMonitor.startSession({
+      type: sessionType,
+      timestamp,
+      source: 'CanvasSurface',
+      detail: { zoomLevel: input.snapshot.camera.z }
+    });
+    input.sessionRef.current = { sessionId, sessionType };
   }
 }
 
@@ -113,18 +134,20 @@ export function syncCanvasPerfPointerInteractionSessionState(input: {
   const timestamp = canvasPerfTimestamp();
   if (input.pointerInteraction) {
     if (!input.sessionRef.current) {
-      const sessionId = perfMonitor.startSession({
-        type: input.pointerInteraction.kind === 'selection-marquee'
+      const sessionType = input.pointerInteraction.kind === 'selection-marquee'
           ? 'pointer-selection'
           : input.pointerInteraction.kind === 'move-node'
             ? 'pointer-move-node'
-            : 'pointer-resize-node',
+            : 'pointer-resize-node';
+      const sessionId = perfMonitor.startSession({
+        type: sessionType,
         timestamp,
         source: 'CanvasSurface',
         detail: canvasPerfPointerInteractionSessionDetail(input.pointerInteraction)
       });
       input.sessionRef.current = {
         sessionId,
+        sessionType,
         pointerInteractionActivated: input.pointerInteraction.phase === 'active'
       };
     } else if (input.pointerInteraction.phase === 'active') {
@@ -146,6 +169,21 @@ export function syncCanvasPerfPointerInteractionSessionState(input: {
       detail: { activated: session.pointerInteractionActivated === true }
     });
     input.sessionRef.current = undefined;
+  }
+}
+
+function canvasPerfCameraSessionType(
+  origin: CanvasCameraChangeOrigin
+): Extract<CanvasPerfSessionType, 'camera-pan' | 'camera-zoom' | 'camera-minimap'> | undefined {
+  switch (origin) {
+    case 'pan':
+      return 'camera-pan';
+    case 'zoom':
+      return 'camera-zoom';
+    case 'minimap':
+      return 'camera-minimap';
+    case 'programmatic':
+      return undefined;
   }
 }
 

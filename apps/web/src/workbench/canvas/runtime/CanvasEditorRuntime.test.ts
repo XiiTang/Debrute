@@ -73,6 +73,76 @@ describe('CanvasEditorRuntime', () => {
     }
   });
 
+  it('publishes one transient origin for every camera commit', () => {
+    const runtime = createRuntime();
+    runtime.bindSurface({
+      surface: fakeElement({ left: 0, top: 0, width: 800, height: 600 }) as unknown as HTMLElement
+    });
+    const origins: string[] = [];
+    runtime.subscribeCamera((_camera, origin) => origins.push(origin));
+
+    runtime.camera.setCamera({ x: 1, y: 2, z: 1 });
+    runtime.camera.setCamera({ x: 2, y: 3, z: 1 }, 'minimap');
+    runtime.camera.panBy({ x: 5, y: 0 });
+    runtime.camera.applyWheel({
+      screenPoint: { x: 100, y: 100 },
+      delta: { x: 4, y: 0, z: 0 }
+    });
+    runtime.camera.applyWheel({
+      screenPoint: { x: 100, y: 100 },
+      delta: { x: 0, y: 0, z: 0.1 }
+    });
+    runtime.camera.centerOn({ x: 40, y: 30 });
+    runtime.camera.reset();
+
+    expect(origins).toEqual([
+      'programmatic',
+      'minimap',
+      'pan',
+      'pan',
+      'zoom',
+      'programmatic',
+      'programmatic'
+    ]);
+    expect(runtime.getSnapshot()).not.toHaveProperty('cameraOrigin');
+  });
+
+  it('publishes zoom origin from native gesture input without a duplicate camera API', () => {
+    const eventListeners = new Map<string, Set<(event: Event) => void>>();
+    const restoreWindow = installBrowserRuntime({ eventListeners });
+    const surface: ReturnType<typeof fakeElement> & { contains(target: EventTarget | null): boolean } = {
+      ...fakeElement({ left: 0, top: 0, width: 800, height: 600 }),
+      contains: (target: EventTarget | null): boolean => (
+        target === (surface as unknown as EventTarget)
+      )
+    };
+    try {
+      const runtime = createRuntime();
+      runtime.bindSurface({ surface: surface as unknown as HTMLElement });
+      const origins: string[] = [];
+      runtime.subscribeCamera((_camera, origin) => origins.push(origin));
+      const gesture = (scale: number) => ({
+        target: surface,
+        clientX: 100,
+        clientY: 100,
+        scale,
+        preventDefault: vi.fn()
+      }) as unknown as Event;
+
+      for (const listener of eventListeners.get('gesturestart') ?? []) {
+        listener(gesture(1));
+      }
+      for (const listener of eventListeners.get('gesturechange') ?? []) {
+        listener(gesture(1.2));
+      }
+
+      expect(origins).toEqual(['zoom']);
+      expect(runtime.camera.getCamera().z).toBeCloseTo(1.2);
+    } finally {
+      restoreWindow();
+    }
+  });
+
   it('publishes live Camera listeners before moving-state listeners', () => {
     const runtime = createRuntime();
     const publications: unknown[] = [];
@@ -1360,6 +1430,7 @@ function fakeElement(rect = { left: 0, top: 0, width: 1, height: 1 }): {
 function installBrowserRuntime(input: {
   requestAnimationFrame?: (callback: FrameRequestCallback) => number;
   cancelAnimationFrame?: (id: number) => void;
+  eventListeners?: Map<string, Set<(event: Event) => void>>;
 } = {}): () => void {
   const originalWindow = globalThis.window;
   const originalResizeObserver = globalThis.ResizeObserver;
@@ -1375,8 +1446,14 @@ function installBrowserRuntime(input: {
       cancelAnimationFrame: input.cancelAnimationFrame ?? ((id: number) => {
         globalThis.clearTimeout(id);
       }),
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined
+      addEventListener: (type: string, listener: (event: Event) => void) => {
+        const listeners = input.eventListeners?.get(type) ?? new Set<(event: Event) => void>();
+        listeners.add(listener);
+        input.eventListeners?.set(type, listeners);
+      },
+      removeEventListener: (type: string, listener: (event: Event) => void) => {
+        input.eventListeners?.get(type)?.delete(listener);
+      }
     }
   });
   Object.defineProperty(globalThis, 'ResizeObserver', {
