@@ -280,7 +280,6 @@ async function stopIsolatedRuntime() {
   let control;
   try {
     control = await connectRuntimeControl({
-      role: 'launcher',
       productVersion,
       temporaryDirectory: fixtureTemporaryDirectory,
       readyDeadlineMs: Date.now() + 15000

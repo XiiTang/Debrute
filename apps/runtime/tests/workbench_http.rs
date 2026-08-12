@@ -713,7 +713,7 @@ fn activity_stream_is_runtime_global_keeps_history_and_clears_terminal_records_f
         .header(WORKBENCH_CONNECTION_HEADER, &first_credential)
         .json(&json!({
             "kind": "canvas-operation-failed",
-            "operation": "save-layout"
+            "operation": "reset-canvas"
         }))
         .send()
         .expect("Project Activity report should complete");
@@ -738,6 +738,7 @@ fn activity_stream_is_runtime_global_keeps_history_and_clears_terminal_records_f
             event["record"]["message"]["kind"],
             "canvas-operation-failed"
         );
+        assert_eq!(event["record"]["message"]["operation"], "reset-canvas");
     }
 
     let (_third_cookie, _third_credential, mut third_events) =

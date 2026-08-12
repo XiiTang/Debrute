@@ -63,36 +63,12 @@ describe('Runtime Control client', () => {
         });
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'launcher');
+      const client = await connectLauncherClient(socketPath);
       await expect(client.activate({ kind: 'open_browser' })).resolves.toEqual({
         result: 'activation',
         outcome: 'opened'
       });
       expect(requestCount).toBe(1);
-      client.close();
-    });
-  });
-
-  it('resolves the current Root Workbench URL through a ready CLI request', async () => {
-    await withControlServer((socket) => {
-      readFrames(socket, (message) => {
-        if (message.type === 'handshake') {
-          expect(message.role).toBe('cli');
-          acceptHandshake(socket, 'ready');
-          return;
-        }
-        expect(message.request).toEqual({ command: 'resolve_workbench_root_url' });
-        respond(socket, message.request_id, {
-          result: 'workbench_root_url',
-          url: 'http://127.0.0.1:5173/'
-        });
-      });
-    }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'cli');
-      await expect(client.resolveWorkbenchRootUrl()).resolves.toEqual({
-        result: 'workbench_root_url',
-        url: 'http://127.0.0.1:5173/'
-      });
       client.close();
     });
   });
@@ -119,7 +95,7 @@ describe('Runtime Control client', () => {
         });
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'launcher');
+      const client = await connectLauncherClient(socketPath);
       await expect(client.activate({
         kind: 'open_project',
         project_root: '/projects/alpha',
@@ -154,7 +130,7 @@ describe('Runtime Control client', () => {
         });
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'launcher');
+      const client = await connectLauncherClient(socketPath);
       await expect(client.activate({
         kind: 'open_project',
         project_root: '/projects/alpha',
@@ -185,19 +161,20 @@ describe('Runtime Control client', () => {
           });
           return;
         }
-        expect(message.request).toEqual({ command: 'create_cli_authorization' });
+        expect(message.request).toEqual({
+          command: 'register_dev_workbench_origin',
+          origin: 'http://127.0.0.1:5173'
+        });
         respond(socket, message.request_id, {
-          result: 'cli_authorization',
-          origin: 'http://127.0.0.1:41000',
-          authorization: 'connection-secret'
+          result: 'dev_workbench_origin_registered',
+          runtime_origin: 'http://127.0.0.1:41000'
         });
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'cli');
-      await expect(client.createCliAuthorization()).resolves.toEqual({
-        result: 'cli_authorization',
-        origin: 'http://127.0.0.1:41000',
-        authorization: 'connection-secret'
+      const client = await connectLauncherClient(socketPath);
+      await expect(client.registerDevWorkbenchOrigin('http://127.0.0.1:5173')).resolves.toEqual({
+        result: 'dev_workbench_origin_registered',
+        runtime_origin: 'http://127.0.0.1:41000'
       });
       expect(inspectCount).toBe(2);
       client.close();
@@ -225,7 +202,6 @@ describe('Runtime Control client', () => {
     }, async (socketPath) => {
       const client = await connectRuntimeControl({
         socketPath,
-        role: 'launcher',
         productVersion: PRODUCT_VERSION,
         readyDeadlineMs: Date.now() + 80
       });
@@ -256,7 +232,6 @@ describe('Runtime Control client', () => {
     }, async (socketPath) => {
       await expect(connectRuntimeControl({
         socketPath,
-        role: 'launcher',
         productVersion: PRODUCT_VERSION,
         readyDeadlineMs: Date.now() + 50
       })).rejects.toMatchObject({ code: 'runtime_ready_timeout' });
@@ -271,21 +246,19 @@ describe('Runtime Control client', () => {
           return;
         }
         respond(socket, message.request_id, {
-          result: 'cli_authorization',
-          origin: 'http://127.0.0.1:41000',
-          authorization: 'connection-secret'
+          result: 'dev_workbench_origin_registered',
+          runtime_origin: 'http://127.0.0.1:41000'
         });
       });
     }, async (socketPath) => {
       const client = await connectRuntimeControl({
         socketPath,
-        role: 'cli',
         productVersion: PRODUCT_VERSION,
         readyDeadlineMs: Date.now() + 100
       });
       await new Promise((resolve) => setTimeout(resolve, 120));
-      await expect(client.createCliAuthorization()).resolves.toMatchObject({
-        result: 'cli_authorization'
+      await expect(client.registerDevWorkbenchOrigin('http://127.0.0.1:5173')).resolves.toMatchObject({
+        result: 'dev_workbench_origin_registered'
       });
       client.close();
     });
@@ -301,8 +274,8 @@ describe('Runtime Control client', () => {
         respond(socket, message.request_id, { result: 'rejected', code: 'role_denied' });
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'launcher');
-      await expect(client.createCliAuthorization()).resolves.toEqual({
+      const client = await connectLauncherClient(socketPath);
+      await expect(client.createDesktopLaunchTicket('window-1')).resolves.toEqual({
         result: 'rejected',
         code: 'role_denied'
       });
@@ -333,7 +306,7 @@ describe('Runtime Control client', () => {
         }
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'launcher');
+      const client = await connectLauncherClient(socketPath);
       await expect(client.createDesktopLaunchTicket('window-1')).resolves.toEqual({
         result: 'desktop_launch_ticket',
         ticket: 'one-use-ticket',
@@ -380,10 +353,9 @@ describe('Runtime Control client', () => {
         });
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'launcher');
+      const client = await connectLauncherClient(socketPath);
       client.onEvent((event) => events.push(event));
       await client.inspect();
-      expect(client.status).toBe('replacing');
       expect(events).toEqual([
         {
           event: 'desktop_window_open_requested',
@@ -397,7 +369,7 @@ describe('Runtime Control client', () => {
     });
   });
 
-  it('updates status and forwards the Product removal event', async () => {
+  it('forwards the Product removal event', async () => {
     const events: ControlEvent[] = [];
     await withControlServer((socket) => {
       readFrames(socket, (message) => {
@@ -414,10 +386,9 @@ describe('Runtime Control client', () => {
         });
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'launcher');
+      const client = await connectLauncherClient(socketPath);
       client.onEvent((event) => events.push(event));
       await client.inspect();
-      expect(client.status).toBe('removing');
       expect(events).toEqual([{ event: 'product_removing' }]);
       client.close();
     });
@@ -434,7 +405,7 @@ describe('Runtime Control client', () => {
         }
       });
     }, async (socketPath) => {
-      const client = await connectClient(socketPath, 'launcher');
+      const client = await connectLauncherClient(socketPath);
       const lost = deferred<RuntimeControlError>();
       client.onRuntimeLost((error) => lost.resolve(error));
       await expect(lost.promise).resolves.toMatchObject({ code: 'runtime_lost' });
@@ -451,7 +422,7 @@ describe('Runtime Control client', () => {
         }
       });
     }, async (socketPath) => {
-      await expect(connectClient(socketPath, 'launcher')).rejects.toMatchObject({
+      await expect(connectLauncherClient(socketPath)).rejects.toMatchObject({
         code: 'handshake_rejected'
       });
     });
@@ -470,17 +441,16 @@ describe('Runtime Control client', () => {
         writePayload(socket, Buffer.concat([prefix, Buffer.from([0xff]), suffix]));
       });
     }, async (socketPath) => {
-      await expect(connectClient(socketPath, 'launcher')).rejects.toMatchObject({
+      await expect(connectLauncherClient(socketPath)).rejects.toMatchObject({
         code: 'protocol_error'
       });
     });
   });
 });
 
-function connectClient(socketPath: string, role: 'launcher' | 'cli') {
+function connectLauncherClient(socketPath: string) {
   return connectRuntimeControl({
     socketPath,
-    role,
     productVersion: PRODUCT_VERSION,
     readyDeadlineMs: Date.now() + 500
   });

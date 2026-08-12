@@ -33,14 +33,6 @@ impl CliPrimitive {
         }
     }
 
-    #[must_use]
-    pub fn as_u64(&self) -> Option<u64> {
-        match self {
-            Self::Number(value) => value.as_u64(),
-            _ => None,
-        }
-    }
-
     fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }

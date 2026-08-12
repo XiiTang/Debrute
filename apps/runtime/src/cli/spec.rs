@@ -220,11 +220,7 @@ const SPECS: &[CliCommandSpec] = &[
         0,
         None,
         NO_OPTIONS,
-        &[
-            "skills_bundle_unavailable",
-            "skills_bundle_invalid",
-            "skills_state_unreadable",
-        ],
+        &["skills_bundle_unavailable"],
     ),
     spec(
         "models.image.list",

@@ -67,7 +67,6 @@ async function connectDesktopLauncher(
   readyDeadlineMs: number
 ): Promise<RuntimeControlClient> {
   return await connectRuntimeControl({
-    role: 'launcher',
     productVersion,
     readyDeadlineMs
   });

@@ -109,6 +109,28 @@ fn command_inventory_includes_policy_transport_and_lifecycle_errors() {
 }
 
 #[test]
+fn skills_status_inventory_publishes_only_its_real_command_error() {
+    assert_eq!(
+        command_errors("skills.status")
+            .split(',')
+            .collect::<Vec<_>>(),
+        vec![
+            "invalid_command",
+            "invalid_argument",
+            "missing_argument",
+            "invalid_input",
+            "internal_error",
+            "runtime_launch_failed",
+            "runtime_ready_timeout",
+            "runtime_health_failed",
+            "runtime_lost",
+            "product_update_failed",
+            "skills_bundle_unavailable",
+        ]
+    );
+}
+
+#[test]
 fn product_uninstall_requires_explicit_yes_and_accepts_only_the_config_preservation_flag() {
     let missing = parse_cli_args(&["product".into(), "uninstall".into()]).unwrap_err();
     assert_eq!(missing.code(), "missing_argument");
@@ -611,6 +633,24 @@ fn runtime_cli_requires_both_argument_collections() {
         assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
         assert_eq!(error.code, "cli_request_invalid");
     }
+}
+
+#[test]
+fn skills_status_reports_the_published_unavailable_error() {
+    let fixture = CliFixture::new();
+    let result = fixture
+        .service
+        .run(&json!({
+            "command": "skills.status",
+            "positional": [],
+            "options": {},
+            "root": null,
+            "cwd": fixture.root,
+        }))
+        .expect("a valid CLI request should return a CLI result");
+
+    assert_eq!(result.command(), "skills.status");
+    assert_eq!(result.error_code(), Some("skills_bundle_unavailable"));
 }
 
 #[tokio::test]

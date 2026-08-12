@@ -454,7 +454,6 @@ export { runtimeAssetsDirectory, runtimeEntrypoint, workspaceRoot };
 
 async function connectLauncher(readyDeadlineMs: number): Promise<RuntimeControlClient> {
   return await connectRuntimeControl({
-    role: 'launcher',
     productVersion: productVersion(),
     readyDeadlineMs
   });
