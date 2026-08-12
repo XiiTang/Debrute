@@ -34,6 +34,22 @@ become user-visible, does not make Project an operating-system sandbox, and
 does not change ordinary editor-style partial copy semantics without a separate
 product decision.
 
+## Professional Application Integration Sequence
+
+After the current Photoshop Integration, Debrute plans to implement additional
+Professional Application Integrations in this order:
+
+1. Premiere
+2. Blender
+3. After Effects
+4. DaVinci Resolve
+
+Each entry is one peer Integration owned by Runtime and may have one or more
+host-installed Plugins. The sequence records implementation priority, not a
+release-date commitment. Plugin technology, supported host versions, transfer
+operations, packaging, and real-host acceptance criteria remain owned by the
+design and implementation work for each Integration.
+
 ## Photoshop CEP Plugin
 
 Debrute may add a Photoshop CEP Plugin for Photoshop environments or workflows
