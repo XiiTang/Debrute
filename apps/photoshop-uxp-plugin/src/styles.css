@@ -240,13 +240,16 @@ p { margin: 0; }
   z-index: 1;
 }
 
-.photoshop-panel__tree-loading {
+.photoshop-panel__tree-state {
   position: relative;
   min-height: 24px;
   padding: 5px 12px 5px calc(var(--tree-row-left-offset) + var(--tree-indent) + 23px);
   color: var(--panel-muted);
   white-space: nowrap;
 }
+
+.photoshop-panel__tree-state--error,
+.photoshop-panel__tree-state--missing { color: var(--panel-error); }
 
 .photoshop-panel__tree-empty {
   margin: auto;

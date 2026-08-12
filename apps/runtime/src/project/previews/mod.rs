@@ -449,6 +449,13 @@ impl ProjectPreviewService {
     }
 }
 
+#[cfg(test)]
+impl Default for ProjectPreviewService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn remove_capability_entry(
     directory: &cap_std::fs::Dir,
     entry: &cap_std::fs::DirEntry,

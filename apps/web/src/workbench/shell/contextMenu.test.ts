@@ -17,6 +17,7 @@ describe('Workbench context menu', () => {
     ]);
     const commands = actionCommands(buildWorkbenchContextMenuItems({
       target,
+      projectTree: [],
       projection: projection([
         node('flow/a.png', 'manual'),
         node('flow/b.png')
@@ -46,6 +47,7 @@ describe('Workbench context menu', () => {
         invocation: { projectRelativePath: '', kind: 'directory' },
         selection: []
       },
+      projectTree: [],
       projection: undefined
     }))).toEqual(['create-file', 'create-directory', 'paste', 'open-terminal']);
   });
@@ -57,19 +59,46 @@ describe('Workbench context menu', () => {
         invocation: { projectRelativePath: 'notes/readme.md', kind: 'file' },
         selection: [{ projectRelativePath: 'notes/readme.md', kind: 'file' }]
       },
+      projectTree: [{ projectRelativePath: 'notes/readme.md', kind: 'file', sizeBytes: 1024 }],
       projection: undefined
     }))).toContain('inspect');
+  });
+
+  it('shows Photoshop for an eligible Explorer Project Tree file without a Canvas projection', () => {
+    const items = buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        invocation: { projectRelativePath: 'cover.png', kind: 'file' },
+        selection: [{ projectRelativePath: 'cover.png', kind: 'file' }]
+      },
+      projectTree: [{ projectRelativePath: 'cover.png', kind: 'file', sizeBytes: 1024 }],
+      projection: undefined,
+      photoshop: {
+        status: 'connected',
+        transferActive: false,
+        sessions: [{
+          pluginSessionId: 'session-1',
+          hostVersion: '27.0',
+          placementMimeTypes: ['image/png'],
+          documents: [{ documentId: 7, title: 'Poster.psd' }]
+        }]
+      }
+    });
+
+    expect(items.some((item) => item.kind === 'photoshop-submenu')).toBe(true);
   });
 
   it('shows Photoshop only for one eligible file with at least one open live Document', () => {
     const target = canvasTarget('cover.png', [{ projectRelativePath: 'cover.png', kind: 'file', sizeBytes: 1024 }]);
     const withoutSession = buildWorkbenchContextMenuItems({
       target,
+      projectTree: [],
       projection: projection([node('cover.png')]),
       photoshop: { status: 'waiting', transferActive: false, sessions: [] }
     });
     const withoutDocument = buildWorkbenchContextMenuItems({
       target,
+      projectTree: [],
       projection: projection([node('cover.png')]),
       photoshop: {
         status: 'connected',
@@ -84,6 +113,7 @@ describe('Workbench context menu', () => {
     });
     const withDocument = buildWorkbenchContextMenuItems({
       target: canvasTarget('cover.png', [{ projectRelativePath: 'cover.png', kind: 'file', sizeBytes: 1024 }]),
+      projectTree: [],
       projection: projection([node('cover.png')]),
       photoshop: {
         status: 'connected',
@@ -114,6 +144,7 @@ describe('Workbench context menu', () => {
 
     const items = buildWorkbenchContextMenuItems({
       target: canvasTarget('cover.avif', [{ projectRelativePath: 'cover.avif', kind: 'file', sizeBytes: 10 }]),
+      projectTree: [],
       projection: projection([node('cover.avif')]),
       photoshop: {
         status: 'connected',
@@ -142,6 +173,7 @@ describe('Workbench context menu', () => {
   it('keeps a selected Canvas Project root out of filesystem source commands while allowing paste', () => {
     const items = buildWorkbenchContextMenuItems({
       target: canvasTarget('', [{ projectRelativePath: '', kind: 'directory' }]),
+      projectTree: [],
       projection: projection([directoryNode('')]),
       fileClipboard: { operation: 'copy', entries: [{ projectRelativePath: 'a.png', kind: 'file' }] }
     });
@@ -159,6 +191,7 @@ describe('Workbench context menu', () => {
         kind: 'file',
         availability: 'missing'
       }]),
+      projectTree: [],
       projection: projection([node('missing.png')])
     });
     for (const command of ['cut', 'copy', 'delete', 'delete-permanently'] as const) {

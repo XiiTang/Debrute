@@ -73,6 +73,7 @@ gateway.
 - [Runtime Owns One Global Activity Stream](./0066-runtime-owns-one-global-activity-stream.md)
 - [Project Identity Is The Canonical Root](./0067-project-identity-is-the-canonical-root.md)
 - [Professional Application Integration Enablement Is Runtime Owned](./0068-professional-application-integration-enablement-is-runtime-owned.md)
+- [Photoshop Directory Browsing Reuses The Project Tree](./0080-photoshop-directory-browsing-reuses-the-project-tree.md)
 - [Product Removal Is Whole Product](./0073-product-removal-is-whole-product.md)
 - [Managed CLI Is Exposed As A User Command](./0074-managed-cli-is-exposed-as-a-user-command.md)
 - [Official Skills Are Product-Owned Projections](./0075-official-skills-are-product-owned-projections.md)

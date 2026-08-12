@@ -7,12 +7,7 @@ describe('PhotoshopPanelView interaction', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
       projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 2 }],
-      directoryTrees: [{
-        canonicalRoot: 'project-1',
-        projectRevision: 2,
-        status: 'loaded',
-        directories: ['', 'data', 'data/shopify', 'exports']
-      }],
+      directoryPages: directoryPages(2),
       expandedDirectories: [
         { canonicalRoot: 'project-1', directory: '' },
         { canonicalRoot: 'project-1', directory: 'data' }
@@ -56,12 +51,7 @@ describe('PhotoshopPanelView interaction', () => {
   it('uses Explorer keyboard navigation without triggering Send', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
-      directoryTrees: [{
-        canonicalRoot: 'project-1',
-        projectRevision: 2,
-        status: 'loaded',
-        directories: ['', 'data', 'data/shopify', 'exports']
-      }],
+      directoryPages: directoryPages(2),
       expandedDirectories: [
         { canonicalRoot: 'project-1', directory: '' },
         { canonicalRoot: 'project-1', directory: 'data' }
@@ -94,12 +84,7 @@ describe('PhotoshopPanelView interaction', () => {
   it('covers collapsed-row, parent, boundary, and empty-selection keyboard navigation', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
-      directoryTrees: [{
-        canonicalRoot: 'project-1',
-        projectRevision: 2,
-        status: 'loaded',
-        directories: ['', 'data', 'data/shopify', 'exports']
-      }],
+      directoryPages: directoryPages(2),
       expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: {
         canonicalRoot: 'project-1',
@@ -165,12 +150,7 @@ describe('PhotoshopPanelView interaction', () => {
 
     runtime.publish({
       ...runtime.snapshot(),
-      directoryTrees: [{
-        canonicalRoot: 'project-1',
-        projectRevision: 2,
-        status: 'loaded',
-        directories: ['', 'data', 'data/shopify', 'exports']
-      }],
+      directoryPages: directoryPages(2),
       expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: {
         canonicalRoot: 'project-1',
@@ -189,11 +169,12 @@ describe('PhotoshopPanelView interaction', () => {
   it('renders the Runtime-owned destination again after panel detach and attach', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
-      directoryTrees: [{
+      directoryPages: [{
         canonicalRoot: 'project-1',
+        directory: '',
         projectRevision: 2,
         status: 'loaded',
-        directories: ['', 'exports']
+        childDirectories: ['exports']
       }],
       expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: {
@@ -220,11 +201,12 @@ describe('PhotoshopPanelView interaction', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
       projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 3 }],
-      directoryTrees: [{
+      directoryPages: [{
         canonicalRoot: 'project-1',
+        directory: '',
         projectRevision: 3,
         status: 'loading',
-        directories: []
+        childDirectories: []
       }],
       expandedDirectories: [
         { canonicalRoot: 'project-1', directory: '' },
@@ -256,12 +238,7 @@ describe('PhotoshopPanelView interaction', () => {
 
       runtime.publish({
         ...runtime.snapshot(),
-        directoryTrees: [{
-          canonicalRoot: 'project-1',
-          projectRevision: 3,
-          status: 'loaded',
-          directories: ['', 'data', 'data/shopify']
-        }],
+        directoryPages: directoryPages(3, false),
         destination: {
           canonicalRoot: 'project-1',
           projectName: 'Poster',
@@ -288,11 +265,12 @@ describe('PhotoshopPanelView interaction', () => {
   it('keeps destination rows usable while Send is busy', () => {
     const runtime = new FakePanelRuntime({
       ...snapshotFixture(),
-      directoryTrees: [{
+      directoryPages: [{
         canonicalRoot: 'project-1',
+        directory: '',
         projectRevision: 2,
         status: 'loaded',
-        directories: ['', 'data', 'exports']
+        childDirectories: ['data', 'exports']
       }],
       expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }],
       destination: {
@@ -315,6 +293,51 @@ describe('PhotoshopPanelView interaction', () => {
     directory?.click();
     expect(runtime.activateDestination).toHaveBeenCalledWith('project-1', 'data');
     expect(root.textContent).toContain('Sending 3 files to Poster / exports…');
+  });
+
+  it('keeps an errored shallow page expandable so collapse and re-expand can retry it', () => {
+    const runtime = new FakePanelRuntime({
+      ...snapshotFixture(),
+      directoryPages: [
+        {
+          canonicalRoot: 'project-1',
+          directory: '',
+          projectRevision: 2,
+          status: 'loaded',
+          childDirectories: ['retry']
+        },
+        {
+          canonicalRoot: 'project-1',
+          directory: 'retry',
+          projectRevision: 2,
+          status: 'error',
+          childDirectories: [],
+          message: 'Temporary watcher failure.'
+        }
+      ],
+      expandedDirectories: [
+        { canonicalRoot: 'project-1', directory: '' },
+        { canonicalRoot: 'project-1', directory: 'retry' }
+      ]
+    });
+    const root = document.createElement('div');
+    const view = new PhotoshopPanelView(root, runtime as unknown as PhotoshopPluginRuntime);
+    view.attach();
+
+    let retry = root.querySelector<HTMLElement>('[role="treeitem"][data-directory="retry"]');
+    expect(retry?.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('.photoshop-panel__tree-state--error')?.textContent)
+      .toContain('Could not load directories: Temporary watcher failure.');
+    retry?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(runtime.collapseDestination).toHaveBeenCalledWith('project-1', 'retry');
+
+    runtime.publish({
+      ...runtime.snapshot(),
+      expandedDirectories: [{ canonicalRoot: 'project-1', directory: '' }]
+    });
+    retry = root.querySelector<HTMLElement>('[role="treeitem"][data-directory="retry"]');
+    retry?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(runtime.expandDestination).toHaveBeenCalledWith('project-1', 'retry');
   });
 });
 
@@ -353,11 +376,40 @@ function snapshotFixture(): PhotoshopPluginSnapshot {
       items: [{ layerId: 8, name: 'Hero', kind: 'layer' }]
     },
     projects: [{ canonicalRoot: 'project-1', name: 'Poster', revision: 2 }],
-    directoryTrees: [],
+    directoryPages: [],
     expandedDirectories: [],
     destination: null,
     activeExport: null,
     busy: false,
     result: null
   };
+}
+
+function directoryPages(
+  projectRevision: number,
+  includeExports = true
+): PhotoshopPluginSnapshot['directoryPages'] {
+  return [
+    {
+      canonicalRoot: 'project-1',
+      directory: '',
+      projectRevision,
+      status: 'loaded',
+      childDirectories: includeExports ? ['data', 'exports'] : ['data']
+    },
+    {
+      canonicalRoot: 'project-1',
+      directory: 'data',
+      projectRevision,
+      status: 'loaded',
+      childDirectories: ['data/shopify']
+    },
+    {
+      canonicalRoot: 'project-1',
+      directory: 'data/shopify',
+      projectRevision,
+      status: 'loaded',
+      childDirectories: []
+    }
+  ];
 }

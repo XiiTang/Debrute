@@ -406,6 +406,33 @@ acquisition, registers the Product event path, and sends exactly one Product
 Quit request; it never performs an early Desktop-only exit or starts another
 connection.
 
+## Photoshop Integration Acceptance
+
+Photoshop acceptance separates four evidence layers. Contract and unit tests
+cover strict protocol shapes, session leases, destination pages, serial item
+settlement, cleanup, and Workbench eligibility. Runtime tests exercise the
+production gateway listener and exact route, method, Host, Origin,
+authorization, stale-bearer, content-type, and error-envelope matrix; Project
+tests include partial staging writes and disconnect during an admitted commit.
+The built UXP `dist` is then loaded explicitly through UXP Developer Tool and
+tested against the development Runtime and Workbench in the built-in browser.
+Finally, a freshly packaged CCX is installed in isolation and smoke-tested after
+a cold Photoshop start. Packaging or a DOM test is never host acceptance.
+
+The real-host run records Photoshop and UXP Developer Tool versions, Runtime
+port and state, plugin manifest version, `dist` and CCX hashes, exact commands,
+logs, screenshots, and one PASS, FAIL, or BLOCKED result per behavior. It covers
+both startup orders, enable/disable/re-enable, panel detach and reload,
+Explorer-to-Photoshop and Canvas-to-Photoshop independently, exact-Document
+Embedded Smart Object placement, layer and group full-canvas PNG export, alpha,
+same-name collision allocation, shallow deep-directory expansion, `.debrute`
+exclusion, ordinary dependency/build/gitignored directory visibility, deleted
+destination invalidation, session loss before upload, session loss during
+capture, unknown upload settlement, reconnection without replay, complete batch
+temporary cleanup, multiple Documents, and Photoshop restart. The CCX pass
+repeats cold startup, one transfer in each direction, restart without replay,
+and uninstall; it does not duplicate every UDT-loaded behavioral case.
+
 ## Commands And Reports
 
 | Command | Scope |

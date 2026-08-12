@@ -630,13 +630,18 @@ remains Canvas-owned, and Photoshop transfer remains integration-owned. A
 generation-local Terminal request stores only its Project-relative cwd and is
 re-admitted when Terminal creates the requested session.
 
-For one Project-backed PNG, JPEG, WebP, PSD, or AVIF file whose current Canvas
-projection reports a size of at most 256 MiB, the shared context menu adds
-**Send to Photoshop** only when at least one live Photoshop session has an open
-Document. The entire submenu is absent while off, waiting, unavailable,
-unhydrated, or connected without a Document. Once visible, its bounded
-keyboard-accessible rows list every live Photoshop Document, including equal
-titles, and each row owns the exact plugin-session and Document identity.
+For one Project-backed PNG, JPEG, WebP, PSD, or AVIF file at or below 256 MiB,
+the shared context menu adds **Send to Photoshop** only when at least one live
+Photoshop session has an open Document. Explorer derives file kind and byte
+size from the clicked Project Tree entry; it does not require a Canvas
+projection. Canvas derives availability and byte size from the clicked
+projected node; it does not consult Explorer state. Both normalize those
+surface-owned facts into the same Photoshop eligibility rule. The entire
+submenu is absent while off, waiting, unavailable, the clicked surface lacks
+its required facts, or the connected sessions have no Document. Once visible,
+its bounded keyboard-accessible rows list every live Photoshop Document,
+including equal titles, and each row owns the exact plugin-session and Document
+identity.
 Selection closes the menu and sends immediately; there is no dialog or
 remembered target. Runtime creates
 one Photoshop Activity task and updates that same record in place from sending

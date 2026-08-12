@@ -27,9 +27,11 @@ export {
   photoshopPlacementFormatForPath,
   serializePluginMessage,
   type PhotoshopDocumentSnapshot,
+  type PhotoshopExportResult,
   type PhotoshopMimeType,
   type PhotoshopPlacementFormat,
   type PhotoshopPlacementRequirement,
+  type PhotoshopProjectDirectoryPage,
   type PhotoshopProjectSnapshot,
   type PluginMessage,
   type RuntimeMessage

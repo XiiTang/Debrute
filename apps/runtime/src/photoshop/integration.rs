@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, OpenOptions},
-    io::{self, Read as _, Seek as _, SeekFrom},
+    io::{self, Read as _, Seek as _, SeekFrom, Write as _},
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
 };
@@ -13,9 +13,9 @@ use crate::{
     control::{RuntimeControlState, RuntimeStatus, RuntimeWorkPermit},
     project::{
         CanonicalProjectRoot, ProjectCommand, ProjectCommandResult, ProjectDirectoryPath,
-        ProjectError, ProjectPathBatchAttempt, ProjectPathKind, ProjectSessionRegistry,
-        ProjectSessionSummary, ProjectUploadEntry, ProjectUse, ProjectUseKind,
-        assert_project_tree_visible_path, is_project_visible_path, list_project_directory,
+        ProjectDirectoryState, ProjectError, ProjectPathBatchAttempt, ProjectPathKind,
+        ProjectSessionRegistry, ProjectSessionSummary, ProjectSnapshot, ProjectUploadEntry,
+        ProjectUse, ProjectUseKind, assert_project_tree_visible_path, is_project_visible_path,
         open_no_symlink_existing_project_file, resolve_no_symlink_existing_project_path,
         resolve_project_path,
     },
@@ -24,9 +24,10 @@ use crate::{
 use super::{
     PHOTOSHOP_MAX_BATCH_BYTES, PHOTOSHOP_MAX_BATCH_ITEMS, PHOTOSHOP_MAX_FILE_BYTES,
     PhotoshopDocumentView, PhotoshopError, PhotoshopErrorCode, PhotoshopExportItem,
-    PhotoshopExportResult, PhotoshopIntegrationStatus, PhotoshopMimeType, PhotoshopProjectView,
-    PhotoshopSendResult, PhotoshopSessionView, PhotoshopStateView, PhotoshopUploadResult,
-    PluginPhotoshopMessage, RuntimePhotoshopMessage,
+    PhotoshopExportResult, PhotoshopIntegrationStatus, PhotoshopMimeType,
+    PhotoshopProjectDirectoriesOutcome, PhotoshopProjectDirectoriesResult,
+    PhotoshopProjectDirectoryPage, PhotoshopProjectView, PhotoshopSendResult, PhotoshopSessionView,
+    PhotoshopStateView, PhotoshopUploadResult, PluginPhotoshopMessage, RuntimePhotoshopMessage,
 };
 
 type PhotoshopStateObserver = Arc<dyn Fn(PhotoshopStateView) + Send + Sync>;
@@ -47,7 +48,7 @@ enum Command {
 
 struct PlaceCommand {
     session_id: String,
-    staged_path: PathBuf,
+    staged: TemporaryFile,
     byte_length: u64,
     completion: oneshot::Sender<Result<(), PhotoshopError>>,
     _project_use: ProjectUse,
@@ -64,8 +65,40 @@ struct ExportCommand {
     successful_items: HashMap<String, String>,
     uploaded_bytes: u64,
     upload_in_progress: bool,
+    session_lost: bool,
     _project_use: ProjectUse,
     _product_work: RuntimeWorkPermit,
+}
+
+struct TemporaryFile {
+    path: Option<PathBuf>,
+}
+
+impl TemporaryFile {
+    fn new(label: &str) -> Self {
+        Self {
+            path: Some(temporary_path(label)),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.path
+            .as_deref()
+            .expect("live Photoshop temporary file owns its path")
+    }
+}
+
+impl Drop for TemporaryFile {
+    fn drop(&mut self) {
+        let Some(path) = self.path.take() else {
+            return;
+        };
+        if let Err(error) = fs::remove_file(&path)
+            && error.kind() != io::ErrorKind::NotFound
+        {
+            eprintln!("Debrute Photoshop temporary file cleanup failed for {path:?}: {error}");
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -288,7 +321,7 @@ impl PhotoshopIntegration {
     ///
     /// Panics if the bearer reverse index no longer matches its owning session.
     pub fn disconnect(&self, session_id: &str) {
-        let removed = {
+        let (removed, removed_commands) = {
             let mut state = self.lock();
             let removed = state.sessions.remove(session_id);
             if let Some(session) = &removed {
@@ -304,13 +337,26 @@ impl PhotoshopIntegration {
                 .filter(|(_, command)| command_session(command) == session_id)
                 .map(|(id, _)| id.clone())
                 .collect::<Vec<_>>();
+            let mut removed_commands = Vec::new();
             for command_id in command_ids {
-                if let Some(command) = state.commands.remove(&command_id) {
-                    fail_removed_command(command, "Photoshop Runtime session disconnected.");
+                let upload_in_progress = matches!(
+                    state.commands.get(&command_id),
+                    Some(Command::Export(command)) if command.upload_in_progress
+                );
+                if upload_in_progress {
+                    let Some(Command::Export(command)) = state.commands.get_mut(&command_id) else {
+                        unreachable!("validated Photoshop export command changed kind")
+                    };
+                    command.session_lost = true;
+                } else if let Some(command) = state.commands.remove(&command_id) {
+                    removed_commands.push(command);
                 }
             }
-            removed.is_some()
+            (removed.is_some(), removed_commands)
         };
+        for command in removed_commands {
+            fail_removed_command(command, "Photoshop Runtime session disconnected.");
+        }
         if removed {
             self.publish();
         }
@@ -339,8 +385,15 @@ impl PhotoshopIntegration {
             PluginPhotoshopMessage::ProjectDirectoriesRequest {
                 request_id,
                 canonical_root,
-                revision,
-            } => self.send_directories(session_id, request_id, canonical_root, revision),
+                base_project_revision,
+                directories,
+            } => self.send_directories(
+                session_id,
+                request_id,
+                canonical_root,
+                base_project_revision,
+                directories,
+            ),
             PluginPhotoshopMessage::ExportStart {
                 command_id,
                 canonical_root,
@@ -424,7 +477,7 @@ impl PhotoshopIntegration {
             if command.session_id != session_id {
                 return Err(invalid_command());
             }
-            (command.staged_path.clone(), command.byte_length)
+            (command.staged.path().to_owned(), command.byte_length)
         };
         let bytes = fs::read(path)?;
         let byte_length = u64::try_from(bytes.len()).map_err(|_| invalid_command())?;
@@ -496,30 +549,45 @@ impl PhotoshopIntegration {
             &source_name,
             bytes,
         );
-        let mut state = self.lock();
-        let command = match state.commands.get_mut(command_id) {
-            Some(Command::Export(command)) => command,
-            Some(Command::Place(_)) => {
-                panic!("Photoshop upload command changed kind after Project commit")
-            }
-            None => panic!("Photoshop upload command disappeared during Project commit"),
-        };
-        assert!(
-            command.upload_in_progress && command.consumed_items.contains(item_id),
-            "Photoshop upload command must retain its in-progress item"
-        );
-        command.upload_in_progress = false;
-        if let Ok((file_name, next_revision)) = &result {
-            command.project_revision = *next_revision;
+        let retired_command = {
+            let mut state = self.lock();
+            let command = match state.commands.get_mut(command_id) {
+                Some(Command::Export(command)) => command,
+                Some(Command::Place(_)) => {
+                    panic!("Photoshop upload command changed kind after Project commit")
+                }
+                None => panic!("Photoshop upload command disappeared during Project commit"),
+            };
             assert!(
-                command
-                    .successful_items
-                    .insert(item_id.to_owned(), file_name.clone())
-                    .is_none(),
-                "Photoshop upload item must settle successfully once"
+                command.upload_in_progress && command.consumed_items.contains(item_id),
+                "Photoshop upload command must retain its in-progress item"
             );
+            command.upload_in_progress = false;
+            if let Ok((file_name, next_revision)) = &result {
+                command.project_revision = *next_revision;
+                assert!(
+                    command
+                        .successful_items
+                        .insert(item_id.to_owned(), file_name.clone())
+                        .is_none(),
+                    "Photoshop upload item must settle successfully once"
+                );
+            }
+            if command.session_lost {
+                Some(
+                    state
+                        .commands
+                        .remove(command_id)
+                        .expect("settled disconnected Photoshop upload command exists"),
+                )
+            } else {
+                None
+            }
+        };
+        if retired_command.is_some() {
+            drop(retired_command);
+            self.publish();
         }
-        drop(state);
         result.map(|(file_name, _)| PhotoshopUploadResult { file_name })
     }
 
@@ -607,7 +675,7 @@ impl PhotoshopIntegration {
             let (staged_path, byte_length) = stage_project_file(&mut source)?;
             Ok::<_, PhotoshopError>((project_use, file_name, mime_type, staged_path, byte_length))
         })();
-        let (project_use, file_name, mime_type, staged_path, byte_length) =
+        let (project_use, file_name, mime_type, staged, byte_length) =
             prepared.inspect_err(|_| self.clear_active(plugin_session_id, &command_id))?;
         let (completion, receiver) = oneshot::channel();
         let registration = (|| -> Result<(), PhotoshopError> {
@@ -625,7 +693,7 @@ impl PhotoshopIntegration {
                         command_id.clone(),
                         Command::Place(PlaceCommand {
                             session_id: plugin_session_id.to_owned(),
-                            staged_path: staged_path.clone(),
+                            staged,
                             byte_length,
                             completion,
                             _project_use: project_use,
@@ -637,9 +705,7 @@ impl PhotoshopIntegration {
             );
             Ok(())
         })();
-        registration.inspect_err(|_| {
-            let _ = fs::remove_file(&staged_path);
-        })?;
+        registration?;
         let message = RuntimePhotoshopMessage::PlaceRequest {
             command_id: command_id.clone(),
             document_id,
@@ -704,24 +770,109 @@ impl PhotoshopIntegration {
         session_id: &str,
         request_id: String,
         canonical_root: String,
-        revision: u64,
+        base_project_revision: u64,
+        directories: Vec<String>,
     ) -> Result<(), PhotoshopError> {
+        if request_id.is_empty() || directories.is_empty() {
+            return Err(invalid_command());
+        }
+        let mut unique = HashSet::new();
+        let directories = directories
+            .into_iter()
+            .map(|directory| {
+                let parsed = ProjectDirectoryPath::parse(&directory)?;
+                if !unique.insert(parsed.clone()) {
+                    return Err(invalid_command());
+                }
+                Ok(parsed)
+            })
+            .collect::<Result<Vec<_>, PhotoshopError>>()?;
         let Ok(session) = self.projects.get(Path::new(&canonical_root)) else {
             return self.send_current_projects(session_id);
         };
         let summary = session.summary()?;
-        if summary.project_revision != revision {
-            return self.send_current_projects(session_id);
+        if summary.project_revision != base_project_revision {
+            return self.send(
+                session_id,
+                RuntimePhotoshopMessage::ProjectDirectoriesResult(
+                    PhotoshopProjectDirectoriesResult {
+                        request_id,
+                        canonical_root,
+                        base_project_revision,
+                        project_revision: summary.project_revision,
+                        outcome: PhotoshopProjectDirectoriesOutcome::Stale,
+                    },
+                ),
+            );
         }
-        let directories = list_photoshop_target_directories(session.root())?;
+        let visible_directories = directories
+            .iter()
+            .filter(|directory| is_photoshop_target_directory_visible(directory))
+            .cloned()
+            .collect::<Vec<_>>();
+        let result = session.execute_at_revision(
+            base_project_revision,
+            ProjectCommand::LoadDirectories {
+                project_relative_directories: visible_directories,
+            },
+        );
+        let (project_revision, pages) = match result {
+            Ok(result) => {
+                let ProjectCommandResult::Snapshot(snapshot) = result.value else {
+                    unreachable!("Project directory load must return a Project snapshot");
+                };
+                (
+                    result.project_revision,
+                    photoshop_project_directory_pages(&snapshot, &directories),
+                )
+            }
+            Err(error) if error.code() == "project_revision_changed" => {
+                let current = session.summary()?;
+                return self.send(
+                    session_id,
+                    RuntimePhotoshopMessage::ProjectDirectoriesResult(
+                        PhotoshopProjectDirectoriesResult {
+                            request_id,
+                            canonical_root,
+                            base_project_revision,
+                            project_revision: current.project_revision,
+                            outcome: PhotoshopProjectDirectoriesOutcome::Stale,
+                        },
+                    ),
+                );
+            }
+            Err(error) => {
+                eprintln!("Debrute Photoshop Project directory load failed: {error}");
+                (
+                    base_project_revision,
+                    directories
+                        .iter()
+                        .map(|directory| {
+                            if is_photoshop_target_directory_visible(directory) {
+                                PhotoshopProjectDirectoryPage::Error {
+                                    directory: directory.to_string(),
+                                    message: "Debrute could not read this Project directory."
+                                        .to_owned(),
+                                }
+                            } else {
+                                PhotoshopProjectDirectoryPage::Missing {
+                                    directory: directory.to_string(),
+                                }
+                            }
+                        })
+                        .collect(),
+                )
+            }
+        };
         self.send(
             session_id,
-            RuntimePhotoshopMessage::ProjectDirectoriesSnapshot {
+            RuntimePhotoshopMessage::ProjectDirectoriesResult(PhotoshopProjectDirectoriesResult {
                 request_id,
                 canonical_root,
-                revision,
-                directories,
-            },
+                base_project_revision,
+                project_revision,
+                outcome: PhotoshopProjectDirectoriesOutcome::Loaded { pages },
+            }),
         )
     }
 
@@ -758,7 +909,7 @@ impl PhotoshopIntegration {
                 return Err(revision_changed());
             }
             let directory = ProjectDirectoryPath::parse(directory)?;
-            if !directory.is_empty() && !is_project_visible_path(&directory) {
+            if !is_photoshop_target_directory_visible(&directory) {
                 return Err(PhotoshopError::new(
                     PhotoshopErrorCode::TargetDirectoryNotVisible,
                     "Photoshop target directory is not visible.",
@@ -809,6 +960,7 @@ impl PhotoshopIntegration {
                             successful_items: HashMap::new(),
                             uploaded_bytes: 0,
                             upload_in_progress: false,
+                            session_lost: false,
                             _project_use: project_use,
                             _product_work: product_work,
                         }),
@@ -872,7 +1024,7 @@ impl PhotoshopIntegration {
             }
             let result_ids = results
                 .iter()
-                .map(|result| result.item_id.as_str())
+                .map(PhotoshopExportResult::item_id)
                 .collect::<HashSet<_>>();
             if result_ids.len() != results.len()
                 || result_ids.len() != command.items.len()
@@ -880,11 +1032,12 @@ impl PhotoshopIntegration {
                     .items
                     .keys()
                     .all(|item_id| result_ids.contains(item_id.as_str()))
-                || results.iter().any(invalid_export_result)
+                || results.iter().any(|result| result.item_id().is_empty())
                 || results.iter().any(|result| {
-                    result.ok
-                        && command.successful_items.get(&result.item_id)
-                            != result.file_name.as_ref()
+                    match command.successful_items.get(result.item_id()) {
+                        Some(file_name) => result.committed_file_name() != Some(file_name),
+                        None => result.committed_file_name().is_some(),
+                    }
                 })
             {
                 return Err(invalid_command());
@@ -928,7 +1081,6 @@ impl PhotoshopIntegration {
         let Command::Place(command) = command else {
             unreachable!("validated place command changed kind")
         };
-        let _ = fs::remove_file(&command.staged_path);
         let result = if ok {
             Ok(())
         } else {
@@ -965,55 +1117,50 @@ impl PhotoshopIntegration {
         }
         let stem = sanitized_stem(source_name);
         let directory = crate::project::ProjectDirectoryPath::parse(directory)?;
-        let temporary = temporary_path("export");
-        fs::write(&temporary, bytes)?;
-        let result = (|| {
-            for index in 1..=10_000_u32 {
-                let file_name = if index == 1 {
-                    format!("{stem}.png")
-                } else {
-                    format!("{stem} {index}.png")
-                };
-                let relative = directory.join_name(&file_name)?;
-                if resolve_project_path(session.root(), relative.as_directory_path())?.exists() {
-                    continue;
-                }
-                let result = session
-                    .execute_at_revision(
-                        revision,
-                        ProjectCommand::ImportUploadEntries {
-                            entries: vec![ProjectUploadEntry::TemporaryFile {
-                                project_relative_path: relative,
-                                temporary_path: temporary.clone(),
-                            }],
-                            target_directory: directory.clone(),
-                            overwrite: false,
-                        },
-                    )
-                    .map_err(|error| export_project_error(&error))?;
-                match result.value {
-                    ProjectCommandResult::PathsAttempted {
-                        attempt: ProjectPathBatchAttempt::Applied(_),
-                        ..
-                    } => return Ok((file_name, result.project_revision)),
-                    ProjectCommandResult::PathsAttempted {
-                        attempt: ProjectPathBatchAttempt::Conflict,
-                        ..
-                    } => continue,
-                    _ => {}
-                }
-                return Err(PhotoshopError::new(
-                    PhotoshopErrorCode::ExportFailed,
-                    "Photoshop export did not commit a Project file.",
-                ));
+        let temporary = stage_temporary_bytes("export", bytes)?;
+        for index in 1..=10_000_u32 {
+            let file_name = if index == 1 {
+                format!("{stem}.png")
+            } else {
+                format!("{stem} {index}.png")
+            };
+            let relative = directory.join_name(&file_name)?;
+            if resolve_project_path(session.root(), relative.as_directory_path())?.exists() {
+                continue;
             }
-            Err(PhotoshopError::new(
+            let result = session
+                .execute_at_revision(
+                    revision,
+                    ProjectCommand::ImportUploadEntries {
+                        entries: vec![ProjectUploadEntry::TemporaryFile {
+                            project_relative_path: relative,
+                            temporary_path: temporary.path().to_owned(),
+                        }],
+                        target_directory: directory.clone(),
+                        overwrite: false,
+                    },
+                )
+                .map_err(|error| export_project_error(&error))?;
+            match result.value {
+                ProjectCommandResult::PathsAttempted {
+                    attempt: ProjectPathBatchAttempt::Applied(_),
+                    ..
+                } => return Ok((file_name, result.project_revision)),
+                ProjectCommandResult::PathsAttempted {
+                    attempt: ProjectPathBatchAttempt::Conflict,
+                    ..
+                } => continue,
+                _ => {}
+            }
+            return Err(PhotoshopError::new(
                 PhotoshopErrorCode::ExportFailed,
-                "Photoshop export could not allocate a collision-free file name.",
-            ))
-        })();
-        let _ = fs::remove_file(temporary);
-        result
+                "Photoshop export did not commit a Project file.",
+            ));
+        }
+        Err(PhotoshopError::new(
+            PhotoshopErrorCode::ExportFailed,
+            "Photoshop export could not allocate a collision-free file name.",
+        ))
     }
 
     fn projects_snapshot(&self) -> Result<Vec<PhotoshopProjectView>, PhotoshopError> {
@@ -1095,24 +1242,67 @@ impl PhotoshopIntegration {
     }
 }
 
-fn list_photoshop_target_directories(root: &Path) -> Result<Vec<String>, ProjectError> {
-    let mut directories = Vec::new();
-    let mut pending = vec![String::new()];
-    while let Some(parent) = pending.pop() {
-        let parent_path = crate::project::ProjectDirectoryPath::parse(&parent)?;
-        for entry in list_project_directory(root, &parent_path)? {
-            if entry.kind != ProjectPathKind::Directory
-                || !is_project_visible_path(&entry.project_relative_path)
-            {
-                continue;
+fn is_photoshop_target_directory_visible(path: &str) -> bool {
+    is_project_visible_path(path)
+        && !path
+            .split('/')
+            .any(|segment| segment.eq_ignore_ascii_case(".debrute"))
+}
+
+fn photoshop_project_directory_pages(
+    snapshot: &ProjectSnapshot,
+    directories: &[ProjectDirectoryPath],
+) -> Vec<PhotoshopProjectDirectoryPage> {
+    directories
+        .iter()
+        .map(|directory| {
+            if !is_photoshop_target_directory_visible(directory) {
+                return PhotoshopProjectDirectoryPage::Missing {
+                    directory: directory.to_string(),
+                };
             }
-            pending.push(entry.project_relative_path.clone());
-            directories.push(entry.project_relative_path);
-        }
-    }
-    directories.sort();
-    directories.dedup();
-    Ok(directories)
+            let Some(entry) = snapshot.project_tree.iter().find(|entry| {
+                entry.project_relative_path == directory.as_str()
+                    && entry.kind == ProjectPathKind::Directory
+            }) else {
+                return PhotoshopProjectDirectoryPage::Missing {
+                    directory: directory.to_string(),
+                };
+            };
+            if entry.directory_state == Some(ProjectDirectoryState::Loaded) {
+                let child_directories = snapshot
+                    .project_tree
+                    .iter()
+                    .filter(|child| {
+                        child.kind == ProjectPathKind::Directory
+                            && child.project_relative_path != directory.as_str()
+                            && project_directory_parent(&child.project_relative_path)
+                                == directory.as_str()
+                            && is_photoshop_target_directory_visible(&child.project_relative_path)
+                    })
+                    .map(|child| child.project_relative_path.clone())
+                    .collect();
+                PhotoshopProjectDirectoryPage::Loaded {
+                    directory: directory.to_string(),
+                    child_directories,
+                }
+            } else if entry.directory_state == Some(ProjectDirectoryState::Error) {
+                PhotoshopProjectDirectoryPage::Error {
+                    directory: directory.to_string(),
+                    message: "Debrute could not read this Project directory.".to_owned(),
+                }
+            } else {
+                PhotoshopProjectDirectoryPage::Error {
+                    directory: directory.to_string(),
+                    message: "Debrute did not load this Project directory.".to_owned(),
+                }
+            }
+        })
+        .collect()
+}
+
+fn project_directory_parent(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(parent, _)| parent)
 }
 
 impl Drop for PhotoshopIntegration {
@@ -1127,16 +1317,16 @@ impl Drop for PhotoshopIntegration {
     }
 }
 
-fn stage_project_file(source: &mut fs::File) -> Result<(PathBuf, u64), PhotoshopError> {
+fn stage_project_file(source: &mut fs::File) -> Result<(TemporaryFile, u64), PhotoshopError> {
     if source.metadata()?.len() > PHOTOSHOP_MAX_FILE_BYTES {
         return Err(file_too_large());
     }
-    let staged_path = temporary_path("place");
+    let staged = TemporaryFile::new("place");
     let result = (|| -> Result<u64, PhotoshopError> {
         let mut staged = OpenOptions::new()
             .create_new(true)
             .write(true)
-            .open(&staged_path)?;
+            .open(staged.path())?;
         source.seek(SeekFrom::Start(0))?;
         let byte_length = io::copy(&mut source.take(PHOTOSHOP_MAX_FILE_BYTES + 1), &mut staged)?;
         if byte_length > PHOTOSHOP_MAX_FILE_BYTES {
@@ -1145,13 +1335,26 @@ fn stage_project_file(source: &mut fs::File) -> Result<(PathBuf, u64), Photoshop
         staged.sync_all()?;
         Ok(byte_length)
     })();
-    match result {
-        Ok(byte_length) => Ok((staged_path, byte_length)),
-        Err(error) => {
-            let _ = fs::remove_file(&staged_path);
-            Err(error)
-        }
-    }
+    result.map(|byte_length| (staged, byte_length))
+}
+
+fn stage_temporary_bytes(label: &str, bytes: &[u8]) -> Result<TemporaryFile, PhotoshopError> {
+    stage_temporary_bytes_with(label, bytes, |file, bytes| file.write_all(bytes))
+}
+
+fn stage_temporary_bytes_with(
+    label: &str,
+    bytes: &[u8],
+    write: impl FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+) -> Result<TemporaryFile, PhotoshopError> {
+    let temporary = TemporaryFile::new(label);
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(temporary.path())?;
+    write(&mut file, bytes)?;
+    file.sync_all()?;
+    Ok(temporary)
 }
 
 fn export_project_error(error: &ProjectError) -> PhotoshopError {
@@ -1195,10 +1398,11 @@ fn state_view(state: &State) -> PhotoshopStateView {
 }
 
 fn transfer_active(state: &State) -> bool {
-    state
-        .sessions
-        .values()
-        .any(|session| session.active_command.is_some())
+    !state.commands.is_empty()
+        || state
+            .sessions
+            .values()
+            .any(|session| session.active_command.is_some())
 }
 
 fn require_available(state: &State) -> Result<(), PhotoshopError> {
@@ -1270,15 +1474,6 @@ fn validate_command_id(command_id: &str) -> Result<(), PhotoshopError> {
     }
 }
 
-fn invalid_export_result(result: &PhotoshopExportResult) -> bool {
-    result.item_id.is_empty()
-        || result.ok
-            && (result.error_code.is_some()
-                || result.message.is_some()
-                || result.file_name.is_none())
-        || !result.ok && result.file_name.is_some()
-}
-
 fn session_mut<'a>(
     state: &'a mut State,
     session_id: &str,
@@ -1306,7 +1501,6 @@ fn command_session(command: &Command) -> &str {
 
 fn fail_removed_command(command: Command, message: &'static str) {
     if let Command::Place(command) = command {
-        let _ = fs::remove_file(command.staged_path);
         let _ = command.completion.send(Err(PhotoshopError::new(
             PhotoshopErrorCode::SessionInvalid,
             message,
@@ -1421,7 +1615,7 @@ mod tests {
         fs,
         path::{Path, PathBuf},
         sync::atomic::{AtomicBool, Ordering},
-        sync::{Arc, mpsc as std_mpsc},
+        sync::{Arc, Weak, mpsc as std_mpsc},
         thread,
         time::Duration,
     };
@@ -1429,7 +1623,8 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::project::{
-        CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, ProjectPreviewService, ProjectUseKind,
+        CanvasFeedbackArtifacts, DefaultProjectNodeAdapter, ProjectPreviewService,
+        ProjectStreamItem, ProjectUseKind,
     };
 
     use super::*;
@@ -1537,12 +1732,15 @@ mod tests {
     }
 
     fn successful_export_result(item_id: &str, file_name: &str) -> PhotoshopExportResult {
-        PhotoshopExportResult {
+        PhotoshopExportResult::Committed {
             item_id: item_id.to_owned(),
-            ok: true,
-            file_name: Some(file_name.to_owned()),
-            error_code: None,
-            message: None,
+            file_name: file_name.to_owned(),
+        }
+    }
+
+    fn failed_export_result(item_id: &str) -> PhotoshopExportResult {
+        PhotoshopExportResult::Failed {
+            item_id: item_id.to_owned(),
         }
     }
 
@@ -2111,7 +2309,8 @@ mod tests {
     }
 
     #[test]
-    fn outgoing_directory_snapshot_and_admission_ignore_gitignore_but_keep_protected_filters() {
+    fn shallow_directory_pages_share_the_project_tree_and_apply_only_the_photoshop_namespace_filter()
+     {
         let project = TemporaryDirectory::new("filtered-directory-project");
         let home = TemporaryDirectory::new("filtered-directory-home");
         for directory in [
@@ -2119,6 +2318,8 @@ mod tests {
             "ignored/kept",
             "nested/kept",
             "node_modules/package",
+            ".DeBrute/cache",
+            ".git/objects",
         ] {
             fs::create_dir_all(project.as_ref().join(directory)).unwrap();
         }
@@ -2128,6 +2329,11 @@ mod tests {
             .open_project(project.as_ref(), ProjectUseKind::Workbench)
             .unwrap();
         let summary = opened.session.summary().unwrap();
+        let mut subscription = opened.session.subscribe().unwrap();
+        assert!(matches!(
+            subscription.recv().unwrap(),
+            ProjectStreamItem::Snapshot(_)
+        ));
         let integration = enabled_integration(ready_runtime_state(), projects);
         let (admission, mut outbound) = connect(&integration, Vec::new());
 
@@ -2137,37 +2343,58 @@ mod tests {
                 PluginPhotoshopMessage::ProjectDirectoriesRequest {
                     request_id: "directories-1".to_owned(),
                     canonical_root: summary.canonical_root.clone(),
-                    revision: summary.project_revision,
+                    base_project_revision: summary.project_revision,
+                    directories: vec![String::new(), "nested".to_owned()],
                 },
             )
             .unwrap();
 
+        let ProjectStreamItem::Event(event) = subscription
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .expect("Project Tree load must publish one shared Project revision")
+        else {
+            panic!("Project Tree load must publish an event");
+        };
+        let result_revision = event.project_revision;
+        assert_eq!(result_revision, summary.project_revision + 1);
         assert_eq!(
             outbound.blocking_recv(),
-            Some(RuntimePhotoshopMessage::ProjectDirectoriesSnapshot {
-                request_id: "directories-1".to_owned(),
-                canonical_root: summary.canonical_root.clone(),
-                revision: summary.project_revision,
-                directories: vec![
-                    "exports".to_owned(),
-                    "ignored".to_owned(),
-                    "ignored/kept".to_owned(),
-                    "nested".to_owned(),
-                    "nested/kept".to_owned(),
-                    "node_modules".to_owned(),
-                    "node_modules/package".to_owned(),
-                ],
-            })
+            Some(RuntimePhotoshopMessage::ProjectDirectoriesResult(
+                PhotoshopProjectDirectoriesResult {
+                    request_id: "directories-1".to_owned(),
+                    canonical_root: summary.canonical_root.clone(),
+                    base_project_revision: summary.project_revision,
+                    project_revision: result_revision,
+                    outcome: PhotoshopProjectDirectoriesOutcome::Loaded {
+                        pages: vec![
+                            PhotoshopProjectDirectoryPage::Loaded {
+                                directory: String::new(),
+                                child_directories: vec![
+                                    "exports".to_owned(),
+                                    "ignored".to_owned(),
+                                    "nested".to_owned(),
+                                    "node_modules".to_owned(),
+                                ],
+                            },
+                            PhotoshopProjectDirectoryPage::Loaded {
+                                directory: "nested".to_owned(),
+                                child_directories: vec!["nested/kept".to_owned()],
+                            },
+                        ],
+                    },
+                }
+            ))
         );
 
-        for (index, directory) in [".git/objects"].into_iter().enumerate() {
+        for (index, directory) in [".git/objects", ".DeBrute/cache"].into_iter().enumerate() {
             let error = integration
                 .handle_message(
                     &admission.plugin_session_id,
                     PluginPhotoshopMessage::ExportStart {
                         command_id: format!("filtered-export-{index}"),
                         canonical_root: summary.canonical_root.clone(),
-                        project_revision: summary.project_revision,
+                        project_revision: result_revision,
                         directory: directory.to_owned(),
                         items: vec![PhotoshopExportItem {
                             item_id: "item-1".to_owned(),
@@ -2185,7 +2412,7 @@ mod tests {
                 PluginPhotoshopMessage::ExportStart {
                     command_id: "gitignored-export".to_owned(),
                     canonical_root: summary.canonical_root,
-                    project_revision: summary.project_revision,
+                    project_revision: result_revision,
                     directory: "ignored/kept".to_owned(),
                     items: vec![PhotoshopExportItem {
                         item_id: "item-1".to_owned(),
@@ -2295,6 +2522,160 @@ mod tests {
             integration
                 .upload(bearer(&admission), &command_id, "one", b"again")
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn export_finish_cannot_report_a_committed_item_as_failed() {
+        let project = TemporaryDirectory::new("finish-claim-project");
+        let home = TemporaryDirectory::new("finish-claim-home");
+        let projects = registry(home.as_ref());
+        let opened = projects
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
+            .unwrap();
+        let summary = opened.session.summary().unwrap();
+        let integration = enabled_integration(ready_runtime_state(), projects);
+        let (admission, mut outbound) = connect(&integration, Vec::new());
+        integration
+            .handle_message(
+                &admission.plugin_session_id,
+                PluginPhotoshopMessage::ExportStart {
+                    command_id: "finish-claim".to_owned(),
+                    canonical_root: summary.canonical_root,
+                    project_revision: summary.project_revision,
+                    directory: String::new(),
+                    items: vec![PhotoshopExportItem {
+                        item_id: "one".to_owned(),
+                        source_name: "Layer".to_owned(),
+                    }],
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            outbound.try_recv().unwrap(),
+            RuntimePhotoshopMessage::ExportReady { .. }
+        ));
+        let uploaded = integration
+            .upload(bearer(&admission), "finish-claim", "one", b"png")
+            .unwrap();
+
+        assert_eq!(
+            integration
+                .handle_message(
+                    &admission.plugin_session_id,
+                    PluginPhotoshopMessage::ExportFinish {
+                        command_id: "finish-claim".to_owned(),
+                        items: vec![failed_export_result("one")],
+                    },
+                )
+                .unwrap_err()
+                .code(),
+            PhotoshopErrorCode::InvalidTransferPayload
+        );
+        integration
+            .handle_message(
+                &admission.plugin_session_id,
+                PluginPhotoshopMessage::ExportFinish {
+                    command_id: "finish-claim".to_owned(),
+                    items: vec![successful_export_result("one", &uploaded.file_name)],
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn disconnect_during_project_commit_drains_the_upload_without_panicking() {
+        let project = TemporaryDirectory::new("disconnect-commit-project");
+        let home = TemporaryDirectory::new("disconnect-commit-home");
+        let previews = Arc::new(ProjectPreviewService::new());
+        let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews).unwrap());
+        let integration_slot = Arc::new(Mutex::new(Weak::<PhotoshopIntegration>::new()));
+        let callback_slot = Arc::clone(&integration_slot);
+        let projects = ProjectSessionRegistry::with_change_callback(
+            home.as_ref(),
+            Arc::new(DefaultProjectNodeAdapter),
+            feedback,
+            Arc::new(move || {
+                if let Some(integration) = callback_slot.lock().unwrap().upgrade() {
+                    integration.broadcast_projects();
+                }
+            }),
+        );
+        let integration = Arc::new(PhotoshopIntegration::new(
+            "runtime-1".to_owned(),
+            ready_runtime_state(),
+            projects.clone(),
+            Arc::new(|_| {}),
+        ));
+        integration.initialize_enabled(true);
+        integration.set_gateway_available(true);
+        *integration_slot.lock().unwrap() = Arc::downgrade(&integration);
+        let opened = projects
+            .open_project(project.as_ref(), ProjectUseKind::Workbench)
+            .unwrap();
+        let summary = opened.session.summary().unwrap();
+        let (admission, mut outbound) = connect(&integration, Vec::new());
+        integration
+            .handle_message(
+                &admission.plugin_session_id,
+                PluginPhotoshopMessage::ExportStart {
+                    command_id: "disconnect-commit".to_owned(),
+                    canonical_root: summary.canonical_root,
+                    project_revision: summary.project_revision,
+                    directory: String::new(),
+                    items: vec![PhotoshopExportItem {
+                        item_id: "one".to_owned(),
+                        source_name: "Layer".to_owned(),
+                    }],
+                },
+            )
+            .unwrap();
+        loop {
+            if matches!(
+                outbound.blocking_recv().unwrap(),
+                RuntimePhotoshopMessage::ExportReady { .. }
+            ) {
+                break;
+            }
+        }
+        drop(outbound);
+
+        let uploaded = integration
+            .upload(bearer(&admission), "disconnect-commit", "one", b"png")
+            .unwrap();
+
+        assert_eq!(
+            fs::read(project.as_ref().join(uploaded.file_name)).unwrap(),
+            b"png"
+        );
+        assert!(integration.state().sessions.is_empty());
+        assert!(!integration.state().transfer_active);
+        assert_eq!(
+            integration
+                .upload(bearer(&admission), "disconnect-commit", "one", b"again")
+                .unwrap_err()
+                .code(),
+            PhotoshopErrorCode::SessionInvalid
+        );
+    }
+
+    #[test]
+    fn partial_export_staging_write_leaves_no_temporary_file() {
+        let label = format!("export-partial-write-test-{}", Uuid::new_v4());
+        let prefix = format!("debrute-photoshop-{label}-");
+
+        let result = stage_temporary_bytes_with(&label, b"png bytes", |file, bytes| {
+            file.write_all(&bytes[..3])?;
+            Err(io::Error::other("injected partial write failure"))
+        });
+
+        assert!(result.is_err());
+        assert!(
+            fs::read_dir(std::env::temp_dir())
+                .unwrap()
+                .filter_map(Result::ok)
+                .all(|entry| !entry.file_name().to_string_lossy().starts_with(&prefix)),
+            "failed Photoshop export staging must remove partially written bytes"
         );
     }
 

@@ -189,7 +189,7 @@ fn resolving_a_video_resolves_its_text_track_through_the_shared_source_cache() {
     fs::write(root.join("clip.mp4"), b"video bytes").unwrap();
     fs::write(root.join("clip.en.vtt"), b"WEBVTT\n").unwrap();
 
-    let adapter = Arc::new(VideoTextTrackNodeAdapter::default());
+    let adapter = Arc::new(VideoTextTrackNodeAdapter);
     let mut service = ProjectService::open(&root, &home, adapter.clone()).unwrap();
     let snapshot = service.snapshot();
     let video_target = resolving_source_target(snapshot, "clip.mp4");

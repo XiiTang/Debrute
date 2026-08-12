@@ -1310,6 +1310,7 @@ function WorkbenchBoundProjectApp({
   const projectPathCommandRouter = useMemo(() => createProjectPathCommandRouter({
     commandGate: projectCommandGate,
     api,
+    projectTree: snapshot?.projectTree ?? [],
     projection: canvasProjection,
     explorer: explorerController,
     photoshop: readyPhotoshop,
@@ -1340,7 +1341,8 @@ function WorkbenchBoundProjectApp({
     openInspectorPanel,
     readyPhotoshop,
     resetCanvasNodeLayouts,
-    projectCommandGate
+    projectCommandGate,
+    snapshot?.projectTree
   ]);
   const focusCommandRouter = useMemo(() => createWorkbenchFocusCommandRouter({
     getRuntime: () => canvasRuntime,

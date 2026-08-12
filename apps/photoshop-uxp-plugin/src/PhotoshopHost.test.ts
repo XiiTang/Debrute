@@ -382,6 +382,133 @@ describe('PhotoshopHost seam', () => {
     expect(file.delete).toHaveBeenCalledOnce();
   });
 
+  it('reports cleanup failure without hiding the enclosing capture failure', async () => {
+    const layer = { id: 8, name: 'Logo', typename: 'Layer', visible: true };
+    const document = {
+      id: 42,
+      title: 'poster.psd',
+      width: 1,
+      height: 1,
+      activeLayers: [layer],
+      layers: [layer]
+    };
+    const photoshop = {
+      app: { documents: [document], activeDocument: document },
+      action: {
+        addNotificationListener: vi.fn(),
+        removeNotificationListener: vi.fn(),
+        validateReference: vi.fn(async () => true),
+        batchPlay: vi.fn()
+      },
+      core: {
+        executeAsModal: async <T>(target: () => Promise<T> | T) => {
+          await target();
+          throw new Error('Photoshop modal completion failed.');
+        }
+      },
+      imaging: {
+        getPixels: vi.fn(async () => ({
+          imageData: {
+            width: 1,
+            height: 1,
+            components: 4,
+            getData: vi.fn(async () => new Uint8Array([10, 20, 30, 255])),
+            dispose: vi.fn()
+          },
+          sourceBounds: { left: 0, top: 0, right: 1, bottom: 1 }
+        }))
+      }
+    } as unknown as PhotoshopModule;
+    const file = {
+      name: 'capture.png',
+      write: vi.fn(async () => undefined),
+      read: vi.fn(async () => new ArrayBuffer(0)),
+      delete: vi.fn(async () => { throw new Error('temporary file is locked'); })
+    };
+    const uxp = {
+      host: { version: '27.8.0' },
+      storage: {
+        localFileSystem: {
+          getTemporaryFolder: async () => ({ createFile: async () => file }),
+          createSessionToken: () => 'session-token'
+        },
+        formats: { binary: Symbol('binary') }
+      }
+    };
+    const host = new PhotoshopHost(photoshop, uxp as never);
+
+    await expect(host.capturePngs(42, [{
+      itemId: 'item-1',
+      layerId: 8,
+      sourceName: 'Logo'
+    }])).rejects.toThrow(
+      'Photoshop modal completion failed. Cleanup could not remove 1 Photoshop temporary file.'
+    );
+  });
+
+  it('reports cleanup failure after a partial UXP PNG write', async () => {
+    const layer = { id: 8, name: 'Logo', typename: 'Layer', visible: true };
+    const document = {
+      id: 42,
+      title: 'poster.psd',
+      width: 1,
+      height: 1,
+      activeLayers: [layer],
+      layers: [layer]
+    };
+    const photoshop = {
+      app: { documents: [document], activeDocument: document },
+      action: {
+        addNotificationListener: vi.fn(),
+        removeNotificationListener: vi.fn(),
+        validateReference: vi.fn(async () => true),
+        batchPlay: vi.fn()
+      },
+      core: { executeAsModal: async <T>(target: () => Promise<T> | T) => target() },
+      imaging: {
+        getPixels: vi.fn(async () => ({
+          imageData: {
+            width: 1,
+            height: 1,
+            components: 4,
+            getData: vi.fn(async () => new Uint8Array([10, 20, 30, 255])),
+            dispose: vi.fn()
+          },
+          sourceBounds: { left: 0, top: 0, right: 1, bottom: 1 }
+        }))
+      }
+    } as unknown as PhotoshopModule;
+    const file = {
+      name: 'capture.png',
+      write: vi.fn(async () => { throw new Error('partial write failed'); }),
+      read: vi.fn(async () => new ArrayBuffer(0)),
+      delete: vi.fn(async () => { throw new Error('temporary file is locked'); })
+    };
+    const host = new PhotoshopHost(photoshop, {
+      host: { version: '27.8.0' },
+      storage: {
+        localFileSystem: {
+          getTemporaryFolder: async () => ({ createFile: async () => file }),
+          createSessionToken: () => 'session-token'
+        },
+        formats: { binary: Symbol('binary') }
+      }
+    } as never);
+
+    const [result] = await host.capturePngs(42, [{
+      itemId: 'item-1',
+      layerId: 8,
+      sourceName: 'Logo'
+    }]);
+
+    expect(result).toEqual({
+      itemId: 'item-1',
+      ok: false,
+      message: 'partial write failed Cleanup could not remove 1 Photoshop temporary file.'
+    });
+    expect(file.delete).toHaveBeenCalledOnce();
+  });
+
   it('places through the native local-file parameter and verifies a new Embedded Smart Object', async () => {
     const harness = createPlacementHarness({ smartObject: { linked: false } });
 
@@ -461,6 +588,27 @@ describe('PhotoshopHost seam', () => {
     await expect(placement).rejects.toThrow('Photoshop Runtime session was lost.');
     expect(harness.batchPlay).not.toHaveBeenCalled();
     expect(harness.file.delete).toHaveBeenCalledOnce();
+  });
+
+  it('logs placement cleanup failure without reversing a successful commit', async () => {
+    const harness = createPlacementHarness({ smartObject: { linked: false } });
+    harness.file.delete.mockRejectedValue(new Error('temporary file is locked'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await harness.host.placeEmbeddedSmartObject({
+      documentId: 42,
+      fileName: 'hero.webp',
+      bytes: new ArrayBuffer(3),
+      isSessionCurrent: () => true
+    });
+
+    expect(harness.batchPlay).toHaveBeenCalledTimes(2);
+    expect(harness.file.delete).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('Cleanup could not remove the Photoshop temporary file.'),
+      expect.any(Error)
+    );
+    log.mockRestore();
   });
 });
 

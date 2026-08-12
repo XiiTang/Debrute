@@ -102,6 +102,33 @@ export interface PhotoshopProjectSnapshot {
   revision: number;
 }
 
+export type PhotoshopExportResult =
+  | {
+      itemId: string;
+      ok: true;
+      fileName: string;
+    }
+  | {
+      itemId: string;
+      ok: false;
+    };
+
+export type PhotoshopProjectDirectoryPage =
+  | {
+      directory: string;
+      outcome: 'loaded';
+      childDirectories: string[];
+    }
+  | {
+      directory: string;
+      outcome: 'missing';
+    }
+  | {
+      directory: string;
+      outcome: 'error';
+      message: string;
+    };
+
 export type PluginMessage =
   | {
       type: 'photoshop.session.start';
@@ -117,7 +144,8 @@ export type PluginMessage =
       type: 'photoshop.projectDirectories.request';
       requestId: string;
       canonicalRoot: string;
-      revision: number;
+      baseProjectRevision: number;
+      directories: string[];
     }
   | {
       type: 'photoshop.export.start';
@@ -130,13 +158,7 @@ export type PluginMessage =
   | {
       type: 'photoshop.export.finish';
       commandId: string;
-      items: Array<{
-        itemId: string;
-        ok: boolean;
-        fileName?: string;
-        errorCode?: string;
-        message?: string;
-      }>;
+      items: PhotoshopExportResult[];
     }
   | {
       type: 'photoshop.place.result';
@@ -157,13 +179,21 @@ export type RuntimeMessage =
       type: 'photoshop.projects.snapshot';
       projects: PhotoshopProjectSnapshot[];
     }
-  | {
-      type: 'photoshop.projectDirectories.snapshot';
+  | ({
+      type: 'photoshop.projectDirectories.result';
       requestId: string;
       canonicalRoot: string;
-      revision: number;
-      directories: string[];
-    }
+      baseProjectRevision: number;
+      projectRevision: number;
+    } & (
+      | {
+          outcome: 'loaded';
+          pages: PhotoshopProjectDirectoryPage[];
+        }
+      | {
+          outcome: 'stale';
+        }
+    ))
   | {
       type: 'photoshop.export.ready';
       commandId: string;
@@ -204,14 +234,36 @@ export function parseRuntimeMessage(text: string): RuntimeMessage {
     && value.projects.every(isProjectSnapshot)) {
     return value as unknown as RuntimeMessage;
   }
-  if (value.type === 'photoshop.projectDirectories.snapshot'
-    && exactKeys(value, ['type', 'requestId', 'canonicalRoot', 'revision', 'directories'])
+  if (value.type === 'photoshop.projectDirectories.result'
     && nonEmptyString(value.requestId)
     && nonEmptyString(value.canonicalRoot)
-    && nonNegativeInteger(value.revision)
-    && Array.isArray(value.directories)
-    && value.directories.every((directory) => typeof directory === 'string')) {
-    return value as unknown as RuntimeMessage;
+    && nonNegativeInteger(value.baseProjectRevision)
+    && nonNegativeInteger(value.projectRevision)) {
+    if (value.outcome === 'loaded'
+      && exactKeys(value, [
+        'type',
+        'requestId',
+        'canonicalRoot',
+        'baseProjectRevision',
+        'projectRevision',
+        'outcome',
+        'pages'
+      ])
+      && Array.isArray(value.pages)
+      && validProjectDirectoryPages(value.pages)) {
+      return value as unknown as RuntimeMessage;
+    }
+    if (value.outcome === 'stale'
+      && exactKeys(value, [
+        'type',
+        'requestId',
+        'canonicalRoot',
+        'baseProjectRevision',
+        'projectRevision',
+        'outcome'
+      ])) {
+      return value as unknown as RuntimeMessage;
+    }
   }
   if (value.type === 'photoshop.export.ready'
     && exactKeys(value, ['type', 'commandId'])
@@ -246,6 +298,53 @@ function isProjectSnapshot(value: unknown): boolean {
     && nonEmptyString(value.canonicalRoot)
     && typeof value.name === 'string'
     && nonNegativeInteger(value.revision);
+}
+
+function isProjectDirectoryPage(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.directory !== 'string') {
+    return false;
+  }
+  if (value.outcome === 'loaded') {
+    return exactKeys(value, ['directory', 'outcome', 'childDirectories'])
+      && Array.isArray(value.childDirectories)
+      && value.childDirectories.every(nonEmptyString);
+  }
+  if (value.outcome === 'missing') {
+    return exactKeys(value, ['directory', 'outcome']);
+  }
+  return value.outcome === 'error'
+    && exactKeys(value, ['directory', 'outcome', 'message'])
+    && nonEmptyString(value.message);
+}
+
+function validProjectDirectoryPages(values: unknown[]): boolean {
+  const directories = new Set<string>();
+  return values.every((value) => {
+    if (!isProjectDirectoryPage(value)) return false;
+    const page = value as PhotoshopProjectDirectoryPage;
+    if (directories.has(page.directory) || hasDebruteSegment(page.directory)) return false;
+    directories.add(page.directory);
+    if (page.outcome !== 'loaded') return true;
+    const children = new Set<string>();
+    return page.childDirectories.every((child) => {
+      if (children.has(child)
+        || !directChildOf(child, page.directory)
+        || hasDebruteSegment(child)) return false;
+      children.add(child);
+      return true;
+    });
+  });
+}
+
+function directChildOf(child: string, parent: string): boolean {
+  const prefix = parent === '' ? '' : `${parent}/`;
+  return child.startsWith(prefix)
+    && child.length > prefix.length
+    && !child.slice(prefix.length).includes('/');
+}
+
+function hasDebruteSegment(path: string): boolean {
+  return path.split('/').some((segment) => segment.toLowerCase() === '.debrute');
 }
 
 export function isPhotoshopMimeType(value: unknown): value is PhotoshopMimeType {

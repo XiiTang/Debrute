@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 
 pub const PHOTOSHOP_WEBSOCKET_SUBPROTOCOL: &str = "debrute.photoshop.v1";
 pub const PHOTOSHOP_UXP_ORIGIN: &str = "file://";
@@ -84,7 +84,8 @@ pub enum PluginPhotoshopMessage {
     ProjectDirectoriesRequest {
         request_id: String,
         canonical_root: String,
-        revision: u64,
+        base_project_revision: u64,
+        directories: Vec<String>,
     },
     #[serde(rename = "photoshop.export.start", rename_all = "camelCase")]
     ExportStart {
@@ -132,13 +133,127 @@ pub struct PhotoshopExportItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(from = "PhotoshopExportResultWire")]
+pub enum PhotoshopExportResult {
+    Committed { item_id: String, file_name: String },
+    Failed { item_id: String },
+}
+
+impl PhotoshopExportResult {
+    #[must_use]
+    pub fn item_id(&self) -> &str {
+        match self {
+            Self::Committed { item_id, .. } | Self::Failed { item_id } => item_id,
+        }
+    }
+
+    #[must_use]
+    pub fn committed_file_name(&self) -> Option<&str> {
+        match self {
+            Self::Committed { file_name, .. } => Some(file_name),
+            Self::Failed { .. } => None,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum PhotoshopExportResultWire {
+    Committed(PhotoshopCommittedExportResultWire),
+    Failed(PhotoshopFailedExportResultWire),
+}
+
+impl From<PhotoshopExportResultWire> for PhotoshopExportResult {
+    fn from(value: PhotoshopExportResultWire) -> Self {
+        match value {
+            PhotoshopExportResultWire::Committed(value) => Self::Committed {
+                item_id: value.item_id,
+                file_name: value.file_name,
+            },
+            PhotoshopExportResultWire::Failed(value) => Self::Failed {
+                item_id: value.item_id,
+            },
+        }
+    }
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct PhotoshopExportResult {
-    pub item_id: String,
-    pub ok: bool,
-    pub file_name: Option<String>,
-    pub error_code: Option<String>,
-    pub message: Option<String>,
+struct PhotoshopCommittedExportResultWire {
+    item_id: String,
+    #[serde(rename = "ok", deserialize_with = "deserialize_true")]
+    _ok: (),
+    file_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PhotoshopFailedExportResultWire {
+    item_id: String,
+    #[serde(rename = "ok", deserialize_with = "deserialize_false")]
+    _ok: (),
+}
+
+fn deserialize_true<'de, D>(deserializer: D) -> Result<(), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    if bool::deserialize(deserializer)? {
+        Ok(())
+    } else {
+        Err(D::Error::custom("expected true"))
+    }
+}
+
+fn deserialize_false<'de, D>(deserializer: D) -> Result<(), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    if bool::deserialize(deserializer)? {
+        Err(D::Error::custom("expected false"))
+    } else {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhotoshopProjectDirectoriesResult {
+    pub request_id: String,
+    pub canonical_root: String,
+    pub base_project_revision: u64,
+    pub project_revision: u64,
+    #[serde(flatten)]
+    pub outcome: PhotoshopProjectDirectoriesOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", rename_all = "lowercase")]
+pub enum PhotoshopProjectDirectoriesOutcome {
+    Loaded {
+        pages: Vec<PhotoshopProjectDirectoryPage>,
+    },
+    Stale,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "outcome",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+pub enum PhotoshopProjectDirectoryPage {
+    Loaded {
+        directory: String,
+        child_directories: Vec<String>,
+    },
+    Missing {
+        directory: String,
+    },
+    Error {
+        directory: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -152,16 +267,8 @@ pub enum RuntimePhotoshopMessage {
     },
     #[serde(rename = "photoshop.projects.snapshot", rename_all = "camelCase")]
     ProjectsSnapshot { projects: Vec<PhotoshopProjectView> },
-    #[serde(
-        rename = "photoshop.projectDirectories.snapshot",
-        rename_all = "camelCase"
-    )]
-    ProjectDirectoriesSnapshot {
-        request_id: String,
-        canonical_root: String,
-        revision: u64,
-        directories: Vec<String>,
-    },
+    #[serde(rename = "photoshop.projectDirectories.result")]
+    ProjectDirectoriesResult(PhotoshopProjectDirectoriesResult),
     #[serde(rename = "photoshop.export.ready", rename_all = "camelCase")]
     ExportReady { command_id: String },
     #[serde(rename = "photoshop.place.request", rename_all = "camelCase")]
@@ -245,6 +352,133 @@ mod tests {
             })
             .unwrap(),
             json!({"type": "photoshop.export.ready", "commandId": "command-1"})
+        );
+    }
+
+    #[test]
+    fn export_finish_results_are_one_closed_success_or_failure_union() {
+        for message in [
+            json!({
+                "type": "photoshop.export.finish",
+                "commandId": "export-1",
+                "items": [{"itemId": "one", "ok": true, "fileName": "Layer.png"}]
+            }),
+            json!({
+                "type": "photoshop.export.finish",
+                "commandId": "export-1",
+                "items": [{"itemId": "one", "ok": false}]
+            }),
+        ] {
+            assert!(serde_json::from_value::<PluginPhotoshopMessage>(message).is_ok());
+        }
+
+        for message in [
+            json!({
+                "type": "photoshop.export.finish",
+                "commandId": "export-1",
+                "items": [{
+                    "itemId": "one",
+                    "ok": false,
+                    "errorCode": "photoshop_export_failed"
+                }]
+            }),
+            json!({
+                "type": "photoshop.export.finish",
+                "commandId": "export-1",
+                "items": [{"itemId": "one", "ok": false, "message": "Failed."}]
+            }),
+            json!({
+                "type": "photoshop.export.finish",
+                "commandId": "export-1",
+                "items": [{"itemId": "one", "ok": false, "fileName": null}]
+            }),
+            json!({
+                "type": "photoshop.export.finish",
+                "commandId": "export-1",
+                "items": [{"itemId": "one", "ok": true}]
+            }),
+            json!({
+                "type": "photoshop.export.finish",
+                "commandId": "export-1",
+                "items": [{
+                    "itemId": "one",
+                    "ok": true,
+                    "fileName": "Layer.png",
+                    "message": "Saved."
+                }]
+            }),
+        ] {
+            assert!(serde_json::from_value::<PluginPhotoshopMessage>(message).is_err());
+        }
+    }
+
+    #[test]
+    fn directory_pages_use_one_exact_batch_request_and_result_contract() {
+        let request: PluginPhotoshopMessage = serde_json::from_value(json!({
+            "type": "photoshop.projectDirectories.request",
+            "requestId": "directories-1",
+            "canonicalRoot": "C:/projects/project-1",
+            "baseProjectRevision": 4,
+            "directories": ["", "exports"]
+        }))
+        .unwrap();
+        assert_eq!(
+            request,
+            PluginPhotoshopMessage::ProjectDirectoriesRequest {
+                request_id: "directories-1".to_owned(),
+                canonical_root: "C:/projects/project-1".to_owned(),
+                base_project_revision: 4,
+                directories: vec![String::new(), "exports".to_owned()],
+            }
+        );
+        assert!(
+            serde_json::from_value::<PluginPhotoshopMessage>(json!({
+                "type": "photoshop.projectDirectories.request",
+                "requestId": "directories-1",
+                "canonicalRoot": "C:/projects/project-1",
+                "revision": 4
+            }))
+            .is_err()
+        );
+
+        assert_eq!(
+            serde_json::to_value(RuntimePhotoshopMessage::ProjectDirectoriesResult(
+                PhotoshopProjectDirectoriesResult {
+                    request_id: "directories-1".to_owned(),
+                    canonical_root: "C:/projects/project-1".to_owned(),
+                    base_project_revision: 4,
+                    project_revision: 5,
+                    outcome: PhotoshopProjectDirectoriesOutcome::Loaded {
+                        pages: vec![
+                            PhotoshopProjectDirectoryPage::Loaded {
+                                directory: String::new(),
+                                child_directories: vec!["exports".to_owned()],
+                            },
+                            PhotoshopProjectDirectoryPage::Missing {
+                                directory: "removed".to_owned(),
+                            },
+                            PhotoshopProjectDirectoryPage::Error {
+                                directory: "unreadable".to_owned(),
+                                message: "Access denied.".to_owned(),
+                            },
+                        ],
+                    },
+                },
+            ))
+            .unwrap(),
+            json!({
+                "type": "photoshop.projectDirectories.result",
+                "requestId": "directories-1",
+                "canonicalRoot": "C:/projects/project-1",
+                "baseProjectRevision": 4,
+                "projectRevision": 5,
+                "outcome": "loaded",
+                "pages": [
+                    {"directory": "", "outcome": "loaded", "childDirectories": ["exports"]},
+                    {"directory": "removed", "outcome": "missing"},
+                    {"directory": "unreadable", "outcome": "error", "message": "Access denied."}
+                ]
+            })
         );
     }
 }

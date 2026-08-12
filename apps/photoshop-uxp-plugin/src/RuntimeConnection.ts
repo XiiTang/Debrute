@@ -44,7 +44,40 @@ interface RuntimeConnectionOptions {
   schedule?(callback: () => void, delay: number): unknown;
   cancelSchedule?(handle: unknown): void;
   onState(state: RuntimeConnectionState): void;
-  onMessage(message: Exclude<RuntimeMessage, { type: 'photoshop.session.ready' }>): void;
+  onMessage(
+    session: RuntimeSessionLease,
+    message: Exclude<RuntimeMessage, { type: 'photoshop.session.ready' }>
+  ): void;
+}
+
+export interface RuntimeSessionLease {
+  readonly pluginSessionId: string;
+  isLive(): boolean;
+  send(message: PluginMessage): void;
+  downloadCommandContent(commandId: string, expectedBytes: number): Promise<ArrayBuffer>;
+  uploadExportItem(
+    commandId: string,
+    itemId: string,
+    bytes: Uint8Array
+  ): Promise<{ fileName: string }>;
+}
+
+export class RuntimeTransferRejectedError extends Error {}
+
+export class RuntimeSessionLostError extends Error {
+  constructor() {
+    super('Photoshop Runtime session was lost.');
+    this.name = 'RuntimeSessionLostError';
+  }
+}
+
+export class RuntimeUploadOutcomeUnknownError extends Error {
+  constructor(cause?: unknown) {
+    super('Photoshop export item may have been saved, but Runtime confirmation was lost.', {
+      cause
+    });
+    this.name = 'RuntimeUploadOutcomeUnknownError';
+  }
 }
 
 export class RuntimeConnection {
@@ -61,10 +94,7 @@ export class RuntimeConnection {
   private roundDeadline: unknown;
   private candidateDeadline: unknown;
   private retrySchedule: unknown;
-  private gatewayHttpOrigin: string | undefined;
-  private bearer: string | undefined;
-  private generation = 0;
-  private readonly activeRequests = new Set<AbortController>();
+  private activeSession: RuntimeSessionLeaseImpl | undefined;
   private immediateReconnect = false;
 
   constructor(private readonly options: RuntimeConnectionOptions) {
@@ -96,57 +126,15 @@ export class RuntimeConnection {
     if (active !== candidate) {
       active?.close();
     }
-    this.resetSession();
+    this.revokeActiveSession();
     this.publish({ status: 'disconnected' });
   }
 
-  sessionGeneration(): number {
-    return this.generation;
-  }
-
-  send(message: PluginMessage): void {
-    if (!this.activeSocket || this.state.status !== 'ready') {
+  requireSession(): RuntimeSessionLease {
+    if (!this.activeSession?.isLive() || this.state.status !== 'ready') {
       throw new Error('Photoshop Runtime session is not ready.');
     }
-    this.activeSocket.send(serializePluginMessage(message));
-  }
-
-  async downloadCommandContent(commandId: string, expectedBytes: number): Promise<ArrayBuffer> {
-    return this.authorizedRequest(
-      `/photoshop/commands/${encodeURIComponent(commandId)}/content`,
-      { method: 'GET' },
-      async (response) => {
-        const bytes = await response.arrayBuffer();
-        if (bytes.byteLength !== expectedBytes || bytes.byteLength > PHOTOSHOP_MAX_FILE_BYTES) {
-          throw new Error('Photoshop command content length is invalid.');
-        }
-        return bytes;
-      }
-    );
-  }
-
-  async uploadExportItem(commandId: string, itemId: string, bytes: Uint8Array): Promise<{ fileName: string }> {
-    if (bytes.byteLength > PHOTOSHOP_MAX_FILE_BYTES) {
-      throw new Error('Photoshop export item exceeds the file limit.');
-    }
-    return this.authorizedRequest(
-      `/photoshop/exports/${encodeURIComponent(commandId)}/items/${encodeURIComponent(itemId)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'image/png' },
-        body: bytes.buffer.slice(
-          bytes.byteOffset,
-          bytes.byteOffset + bytes.byteLength
-        ) as ArrayBuffer
-      },
-      async (response) => {
-        const value = await response.json() as unknown;
-        if (!isUploadResult(value)) {
-          throw new Error('Photoshop export response is invalid.');
-        }
-        return value;
-      }
-    );
+    return this.activeSession;
   }
 
   private startRound(): void {
@@ -251,9 +239,20 @@ export class RuntimeConnection {
     this.roundActive = false;
     this.candidate = undefined;
     this.activeSocket = socket;
-    this.generation += 1;
-    this.gatewayHttpOrigin = `http://127.0.0.1:${port}`;
-    this.bearer = message.bearer;
+    const session = new RuntimeSessionLeaseImpl({
+      pluginSessionId: message.pluginSessionId,
+      socket,
+      httpOrigin: `http://127.0.0.1:${port}`,
+      bearer: message.bearer,
+      request: this.request,
+      schedule: this.schedule,
+      cancelSchedule: this.cancelSchedule,
+      retire: () => {
+        socket.close();
+        this.handleSessionLoss(socket);
+      }
+    });
+    this.activeSession = session;
     this.publish({
       status: 'ready',
       runtimeInstanceId: message.runtimeInstanceId,
@@ -280,7 +279,12 @@ export class RuntimeConnection {
       this.closeInvalidSession(socket);
       return;
     }
-    this.options.onMessage(message);
+    const session = this.activeSession;
+    if (!session?.isLive()) {
+      this.closeInvalidSession(socket);
+      return;
+    }
+    this.options.onMessage(session, message);
     if (message.type === 'runtime.replacing') {
       this.immediateReconnect = true;
       socket.close();
@@ -300,7 +304,7 @@ export class RuntimeConnection {
       return;
     }
     this.activeSocket = undefined;
-    this.resetSession();
+    this.revokeActiveSession();
     this.publish({ status: 'disconnected' });
     const immediate = this.immediateReconnect;
     this.immediateReconnect = false;
@@ -359,14 +363,9 @@ export class RuntimeConnection {
     this.retrySchedule = undefined;
   }
 
-  private resetSession(): void {
-    this.generation += 1;
-    for (const controller of this.activeRequests) {
-      controller.abort();
-    }
-    this.activeRequests.clear();
-    this.gatewayHttpOrigin = undefined;
-    this.bearer = undefined;
+  private revokeActiveSession(): void {
+    this.activeSession?.revoke();
+    this.activeSession = undefined;
   }
 
   private publish(state: RuntimeConnectionState): void {
@@ -374,38 +373,156 @@ export class RuntimeConnection {
     this.options.onState(state);
   }
 
+}
+
+class RuntimeSessionLeaseImpl implements RuntimeSessionLease {
+  readonly pluginSessionId: string;
+  private readonly socket: PhotoshopSocket;
+  private readonly httpOrigin: string;
+  private readonly bearer: string;
+  private readonly request: (url: string, init?: RequestInit) => Promise<Response>;
+  private readonly schedule: (callback: () => void, delay: number) => unknown;
+  private readonly cancelSchedule: (handle: unknown) => void;
+  private readonly retireSession: () => void;
+  private live = true;
+  private readonly activeRequests = new Set<AbortController>();
+
+  constructor(input: {
+    pluginSessionId: string;
+    socket: PhotoshopSocket;
+    httpOrigin: string;
+    bearer: string;
+    request: (url: string, init?: RequestInit) => Promise<Response>;
+    schedule: (callback: () => void, delay: number) => unknown;
+    cancelSchedule: (handle: unknown) => void;
+    retire: () => void;
+  }) {
+    this.pluginSessionId = input.pluginSessionId;
+    this.socket = input.socket;
+    this.httpOrigin = input.httpOrigin;
+    this.bearer = input.bearer;
+    this.request = input.request;
+    this.schedule = input.schedule;
+    this.cancelSchedule = input.cancelSchedule;
+    this.retireSession = input.retire;
+  }
+
+  isLive(): boolean {
+    return this.live;
+  }
+
+  send(message: PluginMessage): void {
+    this.requireLive();
+    const serialized = serializePluginMessage(message);
+    try {
+      this.socket.send(serialized);
+    } catch {
+      if (this.live) this.retireSession();
+      throw new RuntimeSessionLostError();
+    }
+  }
+
+  async downloadCommandContent(commandId: string, expectedBytes: number): Promise<ArrayBuffer> {
+    const bytes = await this.authorizedRequest(
+      `/photoshop/commands/${encodeURIComponent(commandId)}/content`,
+      { method: 'GET' },
+      async (response) => {
+        const bytes = await response.arrayBuffer();
+        if (bytes.byteLength !== expectedBytes || bytes.byteLength > PHOTOSHOP_MAX_FILE_BYTES) {
+          throw new Error('Photoshop command content length is invalid.');
+        }
+        return bytes;
+      }
+    );
+    this.requireLive();
+    return bytes;
+  }
+
+  async uploadExportItem(
+    commandId: string,
+    itemId: string,
+    bytes: Uint8Array
+  ): Promise<{ fileName: string }> {
+    if (bytes.byteLength > PHOTOSHOP_MAX_FILE_BYTES) {
+      throw new Error('Photoshop export item exceeds the file limit.');
+    }
+    try {
+      return await this.authorizedRequest(
+        `/photoshop/exports/${encodeURIComponent(commandId)}/items/${encodeURIComponent(itemId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'image/png' },
+          body: bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength
+          ) as ArrayBuffer
+        },
+        async (response) => {
+          const value = await response.json() as unknown;
+          if (!isUploadResult(value)) {
+            throw new Error('Photoshop export response is invalid.');
+          }
+          return value;
+        }
+      );
+    } catch (error) {
+      if (error instanceof RuntimeTransferRejectedError
+        || error instanceof RuntimeSessionLostError) {
+        throw error;
+      }
+      const unknown = error instanceof RuntimeUploadOutcomeUnknownError
+        ? error
+        : new RuntimeUploadOutcomeUnknownError(error);
+      if (this.live) {
+        this.retireSession();
+      }
+      throw unknown;
+    }
+  }
+
+  revoke(): void {
+    if (!this.live) return;
+    this.live = false;
+    for (const controller of this.activeRequests) {
+      controller.abort();
+    }
+    this.activeRequests.clear();
+  }
+
+  private requireLive(): void {
+    if (!this.live) throw new RuntimeSessionLostError();
+  }
+
   private async authorizedRequest<T>(
     path: string,
     init: RequestInit,
     consume: (response: Response) => Promise<T>
   ): Promise<T> {
-    const origin = this.gatewayHttpOrigin;
-    const bearer = this.bearer;
-    if (!origin || !bearer || this.state.status !== 'ready') {
-      throw new Error('Photoshop Runtime session is not ready.');
-    }
+    this.requireLive();
     const controller = new AbortController();
-    const generation = this.generation;
     this.activeRequests.add(controller);
     const deadline = this.schedule(() => controller.abort(), BYTE_TIMEOUT_MS);
+    let dispatched = false;
     try {
       const headers = new Headers(init.headers);
-      headers.set('Authorization', `Bearer ${bearer}`);
-      const response = await this.request(`${origin}${path}`, {
+      headers.set('Authorization', `Bearer ${this.bearer}`);
+      const pending = this.request(`${this.httpOrigin}${path}`, {
         ...init,
         headers,
         signal: controller.signal
       });
+      dispatched = true;
+      const response = await pending;
       if (!response.ok) {
         throw await failedTransferError(response);
       }
-      const result = await consume(response);
-      if (controller.signal.aborted
-        || this.generation !== generation
-        || this.state.status !== 'ready') {
-        throw new Error('Photoshop Runtime session was lost.');
-      }
-      return result;
+      return await consume(response);
+    } catch (error) {
+      if (error instanceof RuntimeTransferRejectedError) throw error;
+      if (!dispatched) throw new RuntimeSessionLostError();
+      if (!this.live && init.method !== 'POST') throw new RuntimeSessionLostError();
+      if (init.method === 'POST') throw new RuntimeUploadOutcomeUnknownError(error);
+      throw error;
     } finally {
       this.activeRequests.delete(controller);
       this.cancelSchedule(deadline);
@@ -438,7 +555,7 @@ async function failedTransferError(response: Response): Promise<Error> {
       `Photoshop Runtime returned an invalid error response for HTTP ${response.status}.`
     );
   }
-  return new Error(
+  return new RuntimeTransferRejectedError(
     `Photoshop transfer failed with HTTP ${response.status} (${envelope.error.code}): ${envelope.error.message}`
   );
 }

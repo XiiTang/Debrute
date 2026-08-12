@@ -69,6 +69,9 @@ describe('Photoshop UXP panel styles', () => {
     expect(guideRule).toContain('background: var(--panel-guide)');
     expect(css).not.toMatch(/(?:repeating-)?linear-gradient/);
     expect(css).not.toContain('.photoshop-panel__tree-disclosure');
+    expect(css).toMatch(/\.photoshop-panel__tree-state\s*\{/);
+    expect(css).toContain('.photoshop-panel__tree-state--error');
+    expect(css).toContain('.photoshop-panel__tree-state--missing');
     expect(css).toMatch(/\.photoshop-panel__send:focus\s*\{/);
     expect(css).toMatch(/\.photoshop-panel__send:disabled\s*\{/);
     expect(css).toContain('.photoshop-panel__connection--connected');

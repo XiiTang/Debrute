@@ -128,7 +128,12 @@ impl ProjectTree {
             .iter()
             .map(|directory| ProjectDirectoryPath::parse(directory))
             .collect::<Result<Vec<_>, _>>()?;
-        directories.sort_by_key(|path| path.matches('/').count());
+        directories.sort_by(|left, right| {
+            left.matches('/')
+                .count()
+                .cmp(&right.matches('/').count())
+                .then_with(|| left.cmp(right))
+        });
         directories.dedup();
         directories.retain(|directory| !self.directory_is_loaded(directory));
         if directories.is_empty() {
@@ -143,6 +148,16 @@ impl ProjectTree {
                     .iter()
                     .any(|root| super::project_path_is_same_or_descendant(&directory, root))
             {
+                continue;
+            }
+            if !directory.is_empty()
+                && !self
+                    .entries
+                    .get(directory.as_str())
+                    .is_some_and(|entry| entry.public.kind == ProjectPathKind::Directory)
+            {
+                change.confirmed_missing_paths.push(directory.to_string());
+                blocked_roots.push(directory.into_string());
                 continue;
             }
             match list_project_directory(&self.root, &directory) {

@@ -59,6 +59,7 @@ function routerInput(overrides: Record<string, unknown> = {}) {
       copyProjectPathsToSystemClipboard: vi.fn(),
       sendProjectFileToPhotoshop: vi.fn()
     },
+    projectTree: [],
     projection: undefined,
     explorer: explorerFixture(),
     photoshop: undefined,

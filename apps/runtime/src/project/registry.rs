@@ -174,6 +174,9 @@ pub enum ProjectCommand {
     LoadDirectory {
         project_relative_directory: ProjectDirectoryPath,
     },
+    LoadDirectories {
+        project_relative_directories: Vec<ProjectDirectoryPath>,
+    },
     ResetCanvas,
     PatchCanvasState {
         patch: CanvasStatePatch,
@@ -1582,6 +1585,24 @@ fn execute_project_command(
         } => {
             let previous = service.snapshot().clone();
             let snapshot = service.load_project_directory(&project_relative_directory)?;
+            if snapshots_equivalent(&previous, &snapshot) {
+                Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
+                    snapshot,
+                )))
+            } else {
+                Ok(project_snapshot_mutation(snapshot))
+            }
+        }
+        ProjectCommand::LoadDirectories {
+            project_relative_directories,
+        } => {
+            let previous = service.snapshot().clone();
+            let directories = project_relative_directories
+                .into_iter()
+                .map(ProjectDirectoryPath::into_string)
+                .collect::<Vec<_>>();
+            service.load_project_directories(&directories)?;
+            let snapshot = service.snapshot().clone();
             if snapshots_equivalent(&previous, &snapshot) {
                 Ok(ProjectMutation::unchanged(ProjectCommandResult::Snapshot(
                     snapshot,

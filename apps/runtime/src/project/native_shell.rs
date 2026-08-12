@@ -141,6 +141,7 @@ impl ProjectNativeShellService {
         trash_project_paths_with(project_root, entries, debrute_native_fs::trash_path)
     }
 
+    #[cfg(target_os = "macos")]
     fn run(&self, action: NativeAction) -> Result<(), ProjectError> {
         let output = self.supervisor.run(
             ProcessRequest::new(
@@ -223,6 +224,7 @@ struct ResolvedEntry {
     kind: ProjectPathKind,
 }
 
+#[cfg(target_os = "macos")]
 struct NativeAction {
     executable: PathBuf,
     args: Vec<String>,

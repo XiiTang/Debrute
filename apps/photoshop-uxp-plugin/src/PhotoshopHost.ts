@@ -248,7 +248,15 @@ export class PhotoshopHost {
         return captured;
       }, { commandName: 'Debrute Capture Selected Files' }));
     } catch (error) {
-      await Promise.all(stagedFiles.map(async (staged) => staged.delete().catch(() => undefined)));
+      const cleanup = await Promise.allSettled(stagedFiles.map(async (staged) => staged.delete()));
+      const cleanupFailures = cleanup.filter((result) => result.status === 'rejected');
+      if (cleanupFailures.length > 0) {
+        const suffix = cleanupFailures.length === 1 ? 'file' : 'files';
+        throw new Error(
+          `${errorMessage(error)} Cleanup could not remove ${cleanupFailures.length} Photoshop temporary ${suffix}.`,
+          { cause: { capture: error, cleanup: cleanupFailures } }
+        );
+      }
       throw error;
     }
   }
@@ -334,7 +342,14 @@ export class PhotoshopHost {
     try {
       await file.write(bytes, { format: this.uxp.storage.formats.binary });
     } catch (error) {
-      await file.delete().catch(() => undefined);
+      try {
+        await file.delete();
+      } catch (cleanupError) {
+        throw new Error(
+          `${errorMessage(error)} Cleanup could not remove 1 Photoshop temporary file.`,
+          { cause: { write: error, cleanup: cleanupError } }
+        );
+      }
       throw error;
     }
     return {
@@ -355,6 +370,7 @@ export class PhotoshopHost {
   }): Promise<void> {
     const folder = await this.uxp.storage.localFileSystem.getTemporaryFolder();
     const file = await folder.createFile(temporaryName(input.fileName), { overwrite: false });
+    let operationError: unknown;
     try {
       await file.write(input.bytes, { format: this.uxp.storage.formats.binary });
       const token = this.uxp.storage.localFileSystem.createSessionToken(file);
@@ -392,9 +408,20 @@ export class PhotoshopHost {
           throw new Error('Photoshop created a linked Smart Object instead of an Embedded Smart Object.');
         }
       }, { commandName: 'Debrute Place Embedded Smart Object' });
-    } finally {
-      await file.delete().catch(() => undefined);
+    } catch (error) {
+      operationError = error;
     }
+    try {
+      await file.delete();
+    } catch (cleanupError) {
+      const warning = 'Cleanup could not remove the Photoshop temporary file.';
+      if (operationError !== undefined) {
+        throw new Error(`${errorMessage(operationError)} ${warning}`, { cause: cleanupError });
+      }
+      console.error(`Debrute Photoshop placement cleanup failed. ${warning}`, cleanupError);
+      return;
+    }
+    if (operationError !== undefined) throw operationError;
   }
 
   private async requireDocument(documentId: number): Promise<PhotoshopDocument> {
