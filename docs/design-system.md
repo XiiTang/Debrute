@@ -238,6 +238,16 @@ Mono CJK SC 2.004 in static WOFF2 Regular and Bold builds. One family handles
 its Chinese and Latin coverage; Debrute does not draw custom glyphs or define a
 separate wordmark.
 
+Workbench functional text uses the unitless
+`--db-line-height-functional: 1.45` ratio. Compact single-line labels inherit
+that ratio so each font size receives sufficient vertical glyph space while
+control, title-bar, and panel geometry remains fixed. Horizontal truncation is
+owned by the leaf that renders the text through `overflow`, `white-space`, and
+`text-overflow`; a vertically clipped leaf must not combine that truncation
+with `line-height: 1` or an undersized fixed-pixel line height. Icon-only
+content, badges, and other content that is not vertically clipped may define a
+different explicit line height when their geometry requires it.
+
 Web and Electron load these files from the packaged product rather than a
 network or operating-system font lookup. Static builds are required; the CFF2
 variable builds are not part of the product contract. Font files, source

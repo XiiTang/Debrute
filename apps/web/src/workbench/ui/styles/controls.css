@@ -5,7 +5,6 @@
   background: var(--db-surface-2);
   color: var(--db-text);
   cursor: pointer;
-  line-height: 1;
   box-shadow: var(--db-shadow-control);
   transition:
     background var(--db-duration-fast) var(--db-ease-standard),
