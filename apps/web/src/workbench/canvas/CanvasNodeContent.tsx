@@ -123,7 +123,7 @@ export function CanvasNodeContent({
   const textBufferEnsureKey = canvasTextBufferEnsureKey(
     node,
     textBuffer,
-    contentInteractionActive || inlineTextPresentationRequested
+    inlineTextPresentationRequested
   );
   ensureTextFileBufferRef.current = actions.ensureTextFileBuffer;
 
@@ -404,7 +404,7 @@ function CanvasTextNodeContent({
   const retryTextPreviewSource = useCallback(() => {
     retryPreview(node.projectRelativePath);
   }, [node.projectRelativePath, retryPreview]);
-  const livePresentationRequested = active || inlinePresentationRequested;
+  const livePresentationRequested = inlinePresentationRequested;
   const livePresentationRequestedRef = useRef(livePresentationRequested);
   useLayoutEffect(() => {
     livePresentationRequestedRef.current = livePresentationRequested;

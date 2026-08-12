@@ -84,7 +84,9 @@ function CanvasNodeContent(
   return (
     <CanvasNodeContentImplementation
       {...props}
-      inlineTextPresentationRequested={props.inlineTextPresentationRequested ?? false}
+      inlineTextPresentationRequested={
+        props.inlineTextPresentationRequested ?? props.contentInteractionActive
+      }
       onContentError={props.onContentError ?? (() => undefined)}
     />
   );
@@ -1064,6 +1066,12 @@ describe('CanvasNodeContent text buffer ensure keys', { tags: ['canvas-text'] },
       expect(ensureTextFileBuffer).not.toHaveBeenCalled();
 
       await act(async () => root.render(renderNode({
+        contentInteractionActive: true,
+        inlineTextPresentationRequested: false
+      })));
+      expect(ensureTextFileBuffer).not.toHaveBeenCalled();
+
+      await act(async () => root.render(renderNode({
         contentInteractionActive: false,
         inlineTextPresentationRequested: true
       })));
@@ -1155,13 +1163,16 @@ async function renderTextPreviewNode(
     onUpdateTextViewport?: CanvasNodeContentProps['onUpdateTextViewport'] | undefined;
   }
 ): Promise<void> {
+  const contentInteractionActive = options?.contentInteractionActive ?? false;
+  const inlineTextPresentationRequested = options?.inlineTextPresentationRequested
+    ?? contentInteractionActive;
   await act(async () => {
     root.render(
       <TestProviders>
         <CanvasNodeContent
           node={options?.node ?? textNode('flow/readme.md', 'rev-a')}
-          contentInteractionActive={options?.contentInteractionActive ?? false}
-          inlineTextPresentationRequested={options?.inlineTextPresentationRequested ?? false}
+          contentInteractionActive={contentInteractionActive}
+          inlineTextPresentationRequested={inlineTextPresentationRequested}
           actions={actionsFixture()}
           textBuffer={textBuffer('flow/readme.md', 'rev-a')}
           textPreviewRequest={textPreviewRequest}
