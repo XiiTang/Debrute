@@ -22,7 +22,7 @@ describe('workbench focus command router', () => {
     const runtime = createCanvasEditorRuntime({
       initialProjection: projection,
       submitManualLayout: async () => undefined,
-      selection: { kind: 'nodes', projectRelativePaths: ['a.md'] }
+      selection: { projectRelativePaths: ['a.md'] }
     });
     const clearCut = vi.fn();
     const explorer = { fileClipboard: { operation: 'cut' as const, entries: [{ projectRelativePath: 'a.md', kind: 'file' as const }] }, clearCut };
@@ -47,7 +47,6 @@ describe('workbench focus command router', () => {
     expect(router.dispatch('escape', 'other')).toBe(true);
     expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['a.md']
     });
     expect(clearCut).not.toHaveBeenCalled();
@@ -98,7 +97,6 @@ describe('workbench focus command router', () => {
 
     expect(router.dispatch('select-all', 'canvas')).toBe(true);
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['assets', 'b.png']
     });
 
@@ -123,7 +121,7 @@ describe('workbench focus command router', () => {
 
     router.dispatch('paste', 'canvas');
     expect(run).toHaveBeenCalledTimes(1);
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['assets'] });
+    runtime.setSelection({ projectRelativePaths: ['assets'] });
     router.dispatch('paste', 'canvas');
     expect(run).toHaveBeenLastCalledWith('paste', expect.objectContaining({
       target: expect.objectContaining({

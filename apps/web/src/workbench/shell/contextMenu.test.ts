@@ -24,7 +24,7 @@ describe('Workbench context menu', () => {
     }));
 
     expect(commands).toEqual(expect.arrayContaining([
-      'show-details',
+      'inspect',
       'reset-auto-layout',
       'cut',
       'copy',
@@ -48,6 +48,17 @@ describe('Workbench context menu', () => {
       },
       projection: undefined
     }))).toEqual(['create-file', 'create-directory', 'paste', 'open-terminal']);
+  });
+
+  it('offers Inspect for an Explorer selection without a Canvas projection', () => {
+    expect(actionCommands(buildWorkbenchContextMenuItems({
+      target: {
+        source: 'explorer',
+        invocationEntry: { pathEntry: { projectRelativePath: 'notes/readme.md', kind: 'file' } },
+        selectedEntries: [{ pathEntry: { projectRelativePath: 'notes/readme.md', kind: 'file' } }]
+      },
+      projection: undefined
+    }))).toContain('inspect');
   });
 
   it('shows Photoshop only for one eligible file with at least one open live Document', () => {

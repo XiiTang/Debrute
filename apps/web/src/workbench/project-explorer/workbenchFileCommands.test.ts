@@ -57,25 +57,22 @@ describe('workbench file command helpers', () => {
   });
 
   it('clears Canvas node selections for deleted project paths', () => {
-    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'nodes', projectRelativePaths: ['assets/pages/page.png'] }, 'assets')).toBeUndefined();
-    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'nodes', projectRelativePaths: ['assets/pages/page.png'] }, 'assets/pages/page.png')).toBeUndefined();
-    expect(clearCanvasSelectionAfterDeletedPath({ kind: 'nodes', projectRelativePaths: ['briefs/concept.md'] }, 'assets')).toEqual({ kind: 'nodes', projectRelativePaths: ['briefs/concept.md'] });
+    expect(clearCanvasSelectionAfterDeletedPath({ projectRelativePaths: ['assets/pages/page.png'] }, 'assets')).toBeUndefined();
+    expect(clearCanvasSelectionAfterDeletedPath({ projectRelativePaths: ['assets/pages/page.png'] }, 'assets/pages/page.png')).toBeUndefined();
+    expect(clearCanvasSelectionAfterDeletedPath({ projectRelativePaths: ['briefs/concept.md'] }, 'assets')).toEqual({ projectRelativePaths: ['briefs/concept.md'] });
     expect(clearCanvasSelectionAfterDeletedPath({
-      kind: 'nodes',
       projectRelativePaths: ['assets/cover.png', 'briefs/concept.md']
-    }, 'assets')).toEqual({ kind: 'nodes', projectRelativePaths: ['briefs/concept.md'] });
+    }, 'assets')).toEqual({ projectRelativePaths: ['briefs/concept.md'] });
   });
 
   it('keeps Canvas selection attached to Runtime-confirmed renamed and moved paths', () => {
     expect(rewriteCanvasSelectionAfterPathChanges({
-      kind: 'nodes',
       projectRelativePaths: ['assets', 'assets/pages/page.png', 'brief.md']
     }, [{
       sourceProjectRelativePath: 'assets',
       projectRelativePath: 'archive/assets',
       status: 'ok'
     }])).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['archive/assets', 'archive/assets/pages/page.png', 'brief.md']
     });
   });

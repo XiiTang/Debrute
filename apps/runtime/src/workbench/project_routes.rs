@@ -24,10 +24,10 @@ use tokio::sync::mpsc;
 
 use crate::project::{
     CANVAS_VIDEO_PREVIEW_READ_MAX_TARGETS, CANVAS_VIDEO_PREVIEW_SOURCE_MAX_BYTES,
-    CANVAS_VIDEO_TIME_MAX_MS, CanvasMediaKind, CanvasSourceTarget, CanvasStatePatch,
-    CanvasTextPreviewSourceStatus, CanvasTextPreviewSourceTarget, CanvasVideoMetadata,
-    CanvasVideoPreviewSourceStatus, CanvasVideoPreviewTarget, PreviewCancellation, ProjectCommand,
-    ProjectCommandResult, ProjectDirectoryPath, ProjectError, ProjectPathClipboardFormat,
+    CANVAS_VIDEO_TIME_MAX_MS, CanvasMediaKind, CanvasStatePatch, CanvasTextPreviewSourceStatus,
+    CanvasTextPreviewSourceTarget, CanvasVideoMetadata, CanvasVideoPreviewSourceStatus,
+    CanvasVideoPreviewTarget, PreviewCancellation, ProjectCommand, ProjectCommandResult,
+    ProjectDirectoryPath, ProjectError, ProjectFileSourceTarget, ProjectPathClipboardFormat,
     ProjectPathEntry, ProjectPathKind, ProjectRelativePath, ProjectRevisionResult, ProjectSession,
     ProjectUploadEntry, RevisionedFilePlan, RevisionedFileResponse, UpdateCanvasFeedbackInput,
     admit_project_path_entries, canvas_media_kind_from_path, open_leased_project_file,
@@ -39,7 +39,7 @@ use super::{
     multipart::{MultipartLimits, read_multipart, read_multipart_limited},
     routes::{json_body, json_body_with_limit, service_error_response},
     routing::{ProjectAuthorization, WorkbenchRouterState},
-    services::{make_canvas_resolved_source_public, project_response},
+    services::{make_canvas_resolved_source_public, project_file_url, project_response},
     terminal_hub,
     websocket::WebSocketUpgrade,
 };
@@ -120,7 +120,7 @@ pub(super) async fn raw_file(
         Ok(path) => path,
         Err(error) => return project_error(error),
     };
-    let lease = match session.canvas_source_lease(&path, revision) {
+    let lease = match session.project_file_source_lease(&path, revision) {
         Ok(lease) => lease,
         Err(error) => return project_error(error),
     };
@@ -133,6 +133,85 @@ pub(super) async fn raw_file(
             .header(header::CONTENT_RANGE, format!("bytes */{file_size}"))
             .body(Body::empty())
             .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+        Err(error) => project_error(error),
+    }
+}
+
+pub(super) async fn inspect_project_path(
+    State(state): State<WorkbenchRouterState>,
+    Extension(scope): Extension<ProjectAuthorization>,
+    request: Request,
+) -> Response {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Input {
+        project_relative_path: String,
+    }
+    let input: Input = match json_body(request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    let path = match ProjectDirectoryPath::parse(&input.project_relative_path) {
+        Ok(path) => path,
+        Err(error) => return project_error(error),
+    };
+    let session = match project_session(&state.services, &scope) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    let result = tokio::task::spawn_blocking(move || session.inspect_project_path(&path))
+        .await
+        .expect("Project path inspection worker must complete");
+    match result {
+        Ok(inspection) => Json(inspection).into_response(),
+        Err(error) => project_error(error),
+    }
+}
+
+pub(super) async fn resolve_project_file_source(
+    State(state): State<WorkbenchRouterState>,
+    Extension(scope): Extension<ProjectAuthorization>,
+    request: Request,
+) -> Response {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Input {
+        project_relative_path: String,
+        source_token: String,
+    }
+    let input: Input = match json_body(request).await {
+        Ok(input) => input,
+        Err(response) => return response,
+    };
+    let target = match ProjectRelativePath::parse(&input.project_relative_path) {
+        Ok(project_relative_path) => ProjectFileSourceTarget {
+            project_relative_path,
+            source_token: input.source_token,
+        },
+        Err(error) => return project_error(error),
+    };
+    let session = match project_session(&state.services, &scope) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    let binding_id = scope.binding_id.clone();
+    let source_digests = Arc::clone(state.services.project_source_digests());
+    let result = tokio::task::spawn_blocking(move || {
+        session.resolve_project_file_source(&target, &source_digests)
+    })
+    .await
+    .expect("Project file source worker must complete");
+    match result {
+        Ok(source) => Json(json!({
+            "projectRelativePath": source.project_relative_path,
+            "sourceRevision": source.revision,
+            "fileUrl": project_file_url(
+                &binding_id,
+                &source.project_relative_path,
+                &source.revision,
+            )
+        }))
+        .into_response(),
         Err(error) => project_error(error),
     }
 }
@@ -648,7 +727,7 @@ pub(super) async fn image_preview(
         method == Method::HEAD,
         PreviewCachePolicy::Immutable,
         move |cancellation| {
-            let lease = session.canvas_source_lease(&path, &revision)?;
+            let lease = session.project_file_source_lease(&path, &revision)?;
             previews.resolve_image_preview_lease(&lease, width, cancellation)
         },
     )
@@ -682,7 +761,7 @@ pub(super) async fn canvas_sources_resolve(
         .targets
         .into_iter()
         .map(|target| {
-            Ok(CanvasSourceTarget {
+            Ok(ProjectFileSourceTarget {
                 project_relative_path: ProjectRelativePath::parse(&target.project_relative_path)?,
                 source_token: target.source_token,
             })
@@ -698,7 +777,7 @@ pub(super) async fn canvas_sources_resolve(
         Err(response) => return response,
     };
     let binding_id = scope.binding_id.clone();
-    let source_digests = Arc::clone(runtime.canvas_source_digests());
+    let source_digests = Arc::clone(runtime.project_source_digests());
     let result = tokio::task::spawn_blocking(move || {
         session.resolve_canvas_sources(&targets, &source_digests)
     })
@@ -917,7 +996,10 @@ pub(super) async fn video_preview_sources(
         previews
             .video()
             .read_sources(&targets, cancellation, |target| {
-                session.canvas_source_lease(&target.project_relative_path, &target.source_revision)
+                session.project_file_source_lease(
+                    &target.project_relative_path,
+                    &target.source_revision,
+                )
             })
     })
     .await
@@ -1008,7 +1090,7 @@ pub(super) async fn video_preview_source_save(
     let save_session = Arc::clone(&session);
     let result = match blocking_preview_task(move |cancellation| {
         let lease = save_session
-            .canvas_source_lease(&target.project_relative_path, &target.source_revision)?;
+            .project_file_source_lease(&target.project_relative_path, &target.source_revision)?;
         previews
             .video()
             .save_source(&lease, &target, metadata, &uploaded_source, cancellation)
@@ -1089,8 +1171,10 @@ pub(super) async fn video_preview(
         method == Method::HEAD,
         PreviewCachePolicy::Revalidate,
         move |cancellation| {
-            let lease = session
-                .canvas_source_lease(&target.project_relative_path, &target.source_revision)?;
+            let lease = session.project_file_source_lease(
+                &target.project_relative_path,
+                &target.source_revision,
+            )?;
             previews
                 .video()
                 .resolve_variant(&lease, &target, width, cancellation)

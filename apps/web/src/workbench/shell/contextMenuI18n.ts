@@ -4,7 +4,7 @@ import type { ProjectPathCommand } from './contextMenu';
 
 const commandKeys: Record<ProjectPathCommand, WorkbenchTranslationKey> = {
   'send-to-photoshop': 'shell.contextMenu.sendToPhotoshop',
-  'show-details': 'shell.contextMenu.showDetails',
+  inspect: 'shell.contextMenu.inspect',
   'reset-auto-layout': 'shell.contextMenu.resetAutoLayout',
   'create-file': 'shell.contextMenu.newFile',
   'create-directory': 'shell.contextMenu.newFolder',

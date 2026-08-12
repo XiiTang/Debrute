@@ -234,6 +234,38 @@ describe('Runtime Workbench connection', () => {
     client.dispose();
   });
 
+  it('inspects and resolves one Project file through Project-scoped routes', async () => {
+    const harness = createHarness();
+    const client = createHttpWorkbenchApiClient();
+
+    await client.openProject({ projectRoot: '/tmp/project' });
+    await expect(client.inspectProjectPath({
+      projectRelativePath: 'media/source clip.mp4'
+    })).resolves.toMatchObject({
+      kind: 'file',
+      projectRelativePath: 'media/source clip.mp4'
+    });
+    await expect(client.resolveProjectFileSource({
+      projectRelativePath: 'media/source clip.mp4',
+      sourceToken: 'source-token'
+    })).resolves.toEqual({
+      projectRelativePath: 'media/source clip.mp4',
+      sourceRevision: 'sha256:source',
+      fileUrl: '/api/workbench/bindings/project-1/files/raw/media/source%20clip.mp4?v=sha256%3Asource'
+    });
+
+    const calls = harness.calls.slice(-2);
+    expect(calls.map((call) => call.path)).toEqual([
+      '/api/workbench/bindings/project-1/files/inspect',
+      '/api/workbench/bindings/project-1/files/source/resolve'
+    ]);
+    expect(calls.map((call) => JSON.parse(String(call.init?.body)))).toEqual([
+      { projectRelativePath: 'media/source clip.mp4' },
+      { projectRelativePath: 'media/source clip.mp4', sourceToken: 'source-token' }
+    ]);
+    client.dispose();
+  });
+
   it('projects Runtime Activity events and routes structured reports by scope', async () => {
     const harness = createHarness();
     const client = createHttpWorkbenchApiClient();
@@ -728,6 +760,21 @@ function createHarness(
       return Response.json({
         bindingId: 'project-1',
         projectRevision: 2
+      });
+    }
+    if (path === '/api/workbench/bindings/project-1/files/inspect') {
+      return Response.json({
+        kind: 'file',
+        projectRelativePath: 'media/source clip.mp4',
+        sizeBytes: 42,
+        media: { kind: 'video', sourceToken: 'source-token' }
+      });
+    }
+    if (path === '/api/workbench/bindings/project-1/files/source/resolve') {
+      return Response.json({
+        projectRelativePath: 'media/source clip.mp4',
+        sourceRevision: 'sha256:source',
+        fileUrl: '/api/workbench/bindings/project-1/files/raw/media/source%20clip.mp4?v=sha256%3Asource'
       });
     }
     if (path === '/api/workbench/bindings/project-1/canvas-video-previews/sources') {

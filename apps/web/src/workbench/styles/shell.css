@@ -573,7 +573,6 @@ html[data-workbench-window-gesture="se"] * {
 .floating-panel-interaction-row {
   position: relative;
   grid-row: 1;
-  z-index: 2;
   min-width: 0;
   min-height: 0;
   height: var(--db-floating-panel-drag-hit-area-height);

@@ -420,8 +420,10 @@ General places the controlled Start at Login switch and its one-line description
 directly after Language without a Startup heading or card. While its native
 write is pending, only that switch is disabled; an exact failure appears inline.
 
-Explorer owns tree geometry and editing. Inspector owns selection properties,
-metadata, and diagnostics. Terminal owns terminal tabs, sessions, status, and
+Explorer owns tree geometry and editing. Inspector owns on-demand information
+for the latest Explorer or Canvas Project-path selection and the file's optional
+AI Generation Record; it does not own Canvas geometry or Project Diagnostics.
+Terminal owns terminal tabs, sessions, status, and
 emulator geometry. Project Open owns one focused entry rendered directly over
 the Canvas background. Canvas owns node geometry, media presentation,
 annotations, handles, feedback, and overlay placement.

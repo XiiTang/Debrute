@@ -185,6 +185,32 @@ export interface CanvasSourceResolutionResponse {
   }>;
 }
 
+export type ProjectPathInspection =
+  | {
+      kind: 'file';
+      projectRelativePath: string;
+      sizeBytes: number;
+      createdAtMs?: number;
+      modifiedAtMs?: number;
+      media:
+        | { kind: 'image'; dimensions?: CanvasImageDimensions }
+        | { kind: 'video'; sourceToken: string }
+        | { kind: 'audio'; sourceToken: string }
+        | { kind: 'other' };
+    }
+  | {
+      kind: 'directory';
+      projectRelativePath: string;
+      createdAtMs?: number;
+      modifiedAtMs?: number;
+    };
+
+export interface ProjectFileSourceResolution {
+  projectRelativePath: string;
+  sourceRevision: string;
+  fileUrl: string;
+}
+
 export type CanvasFeedbackMark = string;
 export type CanvasFeedbackGeometry =
   | { type: 'point'; x: number; y: number }
@@ -1710,6 +1736,14 @@ export interface WorkbenchApiClient {
     onError: (error: Error) => void
   ): TerminalEventSubscription;
   readProjectTextFile(projectRelativePath: string): Promise<WorkbenchProjectTextFile>;
+  inspectProjectPath(
+    input: { projectRelativePath: string },
+    signal?: AbortSignal
+  ): Promise<ProjectPathInspection>;
+  resolveProjectFileSource(
+    input: { projectRelativePath: string; sourceToken: string },
+    signal?: AbortSignal
+  ): Promise<ProjectFileSourceResolution>;
   resolveCanvasSources(input: CanvasSourceResolutionRequest): Promise<CanvasSourceResolutionResponse>;
   loadProjectDirectory(projectRelativeDirectory: string): Promise<RevisionedProjectResult>;
   writeProjectTextFile(input: WriteProjectTextFileInput): Promise<WorkbenchProjectTextFileWriteResult>;
@@ -1732,7 +1766,10 @@ export interface WorkbenchApiClient {
   importExternalLocalProjectPaths(input: WorkbenchProjectExternalLocalImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   importExternalProjectUploads(input: WorkbenchProjectUploadImportInput): Promise<WorkbenchProjectFileBatchOperationResult>;
   revealProjectPathInSystemFileManager(input: { projectRelativePath: string; kind: 'file' | 'directory' }): Promise<{ ok: true }>;
-  lookupModelArtifactProvenance(input: { projectRelativePath: string }): Promise<ModelArtifactProvenanceLookup>;
+  lookupModelArtifactProvenance(
+    input: { projectRelativePath: string },
+    signal?: AbortSignal
+  ): Promise<ModelArtifactProvenanceLookup>;
   readCanvasFeedback(): Promise<CanvasFeedbackDocument>;
   updateCanvasFeedback(input: UpdateCanvasFeedbackInput): Promise<WorkbenchCanvasFeedbackMutationResult>;
   resetCanvas(): Promise<RevisionedProjectResult>;

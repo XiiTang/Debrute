@@ -82,7 +82,10 @@ staging or replacement-restore files after publication, the successful
 Operation exposes one `model_artifact_cleanup_failed` warning instead of
 silently discarding that failure.
 
-Workbench Inspector and
+Workbench Inspector exposes the same lookup as the collapsed, file-only
+**AI Generation Record** section. It performs no hash or lookup while collapsed;
+an expanded section rechecks the currently selected file and quietly omits
+lookup failures and files without a matching record. The
 `debrute model-artifact lookup --path <absolute-or-cwd-relative-file>` call
 Runtime for one current file. Lookup has no Project positional and does not open
 a Project. Workbench never reads the provenance directory directly.

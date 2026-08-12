@@ -84,7 +84,7 @@ describe('CanvasRenderLifecycle', () => {
     const far = document.createElement('div');
     const unregisterFar = fixture.stageRuntime.registerNodeShell('far.md', far);
 
-    fixture.runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['far.md'] });
+    fixture.runtime.setSelection({ projectRelativePaths: ['far.md'] });
 
     expect(far.style.display).toBe('none');
 

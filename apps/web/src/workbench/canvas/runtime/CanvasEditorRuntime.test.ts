@@ -152,12 +152,12 @@ describe('CanvasEditorRuntime', () => {
     expect(selections).toEqual([]);
     expect(surfaceSizes).toEqual([]);
 
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
     runtime.bindSurface({
       surface: fakeElement({ left: 0, top: 0, width: 640, height: 480 }) as unknown as HTMLElement
     });
 
-    expect(selections).toEqual([{ kind: 'nodes', projectRelativePaths: ['flow/a.png'] }]);
+    expect(selections).toEqual([{ projectRelativePaths: ['flow/a.png'] }]);
     expect(surfaceSizes).toEqual([{ width: 640, height: 480 }]);
   });
 
@@ -176,13 +176,13 @@ describe('CanvasEditorRuntime', () => {
       runtime.bindSurface({
         surface: fakeElement({ left: 0, top: 0, width: 640, height: 480 }) as unknown as HTMLElement
       });
-      runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+      runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
       runtime.camera.setCamera({ x: 10, y: 20, z: 1.5 });
       vi.advanceTimersByTime(64);
 
       expect(snapshots).toEqual([
         ['surfaceSize', { width: 640, height: 480 }],
-        ['selection', { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }],
+        ['selection', { projectRelativePaths: ['flow/a.png'] }],
         ['cameraState', 'moving'],
         ['cameraState', 'idle']
       ]);
@@ -203,7 +203,7 @@ describe('CanvasEditorRuntime', () => {
     unsubscribeSelection();
     unsubscribeSurfaceSize();
 
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
     runtime.bindSurface({
       surface: fakeElement({ left: 0, top: 0, width: 640, height: 480 }) as unknown as HTMLElement
     });
@@ -217,17 +217,17 @@ describe('CanvasEditorRuntime', () => {
     const snapshots: unknown[] = [];
     runtime.subscribe((snapshot) => snapshots.push(snapshot.selection));
 
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
 
-    expect(runtime.getSnapshot().selection).toEqual({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
-    expect(snapshots).toEqual([{ kind: 'nodes', projectRelativePaths: ['flow/a.png'] }]);
+    expect(runtime.getSnapshot().selection).toEqual({ projectRelativePaths: ['flow/a.png'] });
+    expect(snapshots).toEqual([{ projectRelativePaths: ['flow/a.png'] }]);
   });
 
   it('raises the complete Selection while preserving its displayed internal order', () => {
     const runtime = createRuntime();
 
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png', 'flow/b.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/a.png', 'flow/b.png'] });
 
     const presented = runtime.scene.getPresentedNodes();
     expect(presented.get('flow/a.png')!.z).toBeGreaterThan(presented.get('flow/b.png')!.z);
@@ -304,7 +304,7 @@ describe('CanvasEditorRuntime', () => {
 
   it('activates a Selection Marquee after four CSS pixels and recomputes intersecting nodes', async () => {
     const runtime = createMarqueeRuntime();
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/b.png'] });
 
     runtime.input.beginSelectionMarquee({
       pointerId: 4,
@@ -322,7 +322,6 @@ describe('CanvasEditorRuntime', () => {
       phase: 'pending'
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/b.png']
     });
 
@@ -332,7 +331,6 @@ describe('CanvasEditorRuntime', () => {
       modifiers: noModifiers()
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png']
     });
 
@@ -342,7 +340,6 @@ describe('CanvasEditorRuntime', () => {
       modifiers: noModifiers()
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
     });
 
@@ -352,7 +349,7 @@ describe('CanvasEditorRuntime', () => {
 
   it('unions marquee hits with pointer-down selection and restores it on cancellation', () => {
     const runtime = createMarqueeRuntime();
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/b.png'] });
 
     runtime.input.beginSelectionMarquee({
       pointerId: 5,
@@ -365,13 +362,11 @@ describe('CanvasEditorRuntime', () => {
       modifiers: { ...noModifiers(), shiftKey: true }
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
     });
 
     runtime.input.cancelPointerInteraction(5);
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/b.png']
     });
   });
@@ -495,7 +490,7 @@ describe('CanvasEditorRuntime', () => {
 
   it('clears a plain below-threshold blank click and preserves an additive one', async () => {
     const runtime = createMarqueeRuntime();
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
     runtime.input.beginSelectionMarquee({
       pointerId: 7,
       screenPoint: { x: 0, y: 0 },
@@ -508,7 +503,7 @@ describe('CanvasEditorRuntime', () => {
     });
     expect(runtime.getSnapshot().selection).toBeUndefined();
 
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
     runtime.input.beginSelectionMarquee({
       pointerId: 8,
       screenPoint: { x: 0, y: 0 },
@@ -520,7 +515,6 @@ describe('CanvasEditorRuntime', () => {
       modifiers: { ...noModifiers(), metaKey: true }
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png']
     });
   });
@@ -556,13 +550,12 @@ describe('CanvasEditorRuntime', () => {
       });
       runtime.input.updatePointerInteraction({ pointerId, screenPoint, modifiers: noModifiers() });
       expect(runtime.getSnapshot().selection).toEqual({
-        kind: 'nodes',
         projectRelativePaths: [expectedPath]
       });
       runtime.input.cancelPointerInteraction(pointerId);
     });
 
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['nw.png'] });
+    runtime.setSelection({ projectRelativePaths: ['nw.png'] });
     runtime.input.beginSelectionMarquee({
       pointerId: 30,
       screenPoint: { x: 100, y: 100 },
@@ -573,14 +566,13 @@ describe('CanvasEditorRuntime', () => {
       screenPoint: { x: 130, y: 40 },
       modifiers: noModifiers()
     });
-    expect(runtime.getSnapshot().selection).toEqual({ kind: 'nodes', projectRelativePaths: ['ne.png'] });
+    expect(runtime.getSnapshot().selection).toEqual({ projectRelativePaths: ['ne.png'] });
     runtime.input.updatePointerInteraction({
       pointerId: 30,
       screenPoint: { x: 130, y: 40 },
       modifiers: { ...noModifiers(), shiftKey: true }
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['ne.png', 'nw.png']
     });
     runtime.input.updatePointerInteraction({
@@ -588,7 +580,7 @@ describe('CanvasEditorRuntime', () => {
       screenPoint: { x: 130, y: 40 },
       modifiers: noModifiers()
     });
-    expect(runtime.getSnapshot().selection).toEqual({ kind: 'nodes', projectRelativePaths: ['ne.png'] });
+    expect(runtime.getSnapshot().selection).toEqual({ projectRelativePaths: ['ne.png'] });
     runtime.input.cancelPointerInteraction(30);
   });
 
@@ -620,7 +612,6 @@ describe('CanvasEditorRuntime', () => {
     });
 
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['overlap-back.png', 'overlap-front.png', 'touch.png']
     });
     runtime.dispose();
@@ -629,7 +620,6 @@ describe('CanvasEditorRuntime', () => {
   it('prunes Canvas Node Selection when accepting a new Projection', () => {
     const runtime = createMarqueeRuntime();
     runtime.setSelection({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
     });
 
@@ -639,7 +629,6 @@ describe('CanvasEditorRuntime', () => {
     });
 
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/b.png']
     });
   });
@@ -755,7 +744,6 @@ describe('CanvasEditorRuntime', () => {
   it('preserves a selected group on pointer-down, then applies plain and additive click selection on release', async () => {
     const runtime = createRuntime();
     runtime.setSelection({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
     });
 
@@ -766,7 +754,6 @@ describe('CanvasEditorRuntime', () => {
       modifiers: noModifiers()
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
     });
     expect(runtime.getSnapshot().pointerInteraction).toMatchObject({
@@ -778,12 +765,10 @@ describe('CanvasEditorRuntime', () => {
     });
     await runtime.input.finishPointerInteraction({ pointerId: 11, screenPoint: { x: 0, y: 0 } });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/b.png']
     });
 
     runtime.setSelection({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
     });
     runtime.input.beginNodeMove({
@@ -798,7 +783,6 @@ describe('CanvasEditorRuntime', () => {
       modifiers: { ...noModifiers(), shiftKey: true }
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png']
     });
   });
@@ -812,7 +796,7 @@ describe('CanvasEditorRuntime', () => {
     const runtime = createCanvasEditorRuntime({
       initialProjection: { nodes: base, edges: [] },
       submitManualLayout,
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+      selection: { projectRelativePaths: ['flow/a.png'] }
     });
 
     runtime.input.beginNodeMove({
@@ -827,7 +811,6 @@ describe('CanvasEditorRuntime', () => {
       modifiers: { ...noModifiers(), metaKey: true }
     });
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png', 'flow/b.png']
     });
     await runtime.input.finishPointerInteraction({ pointerId: 13, screenPoint: { x: 10, y: 15 } });
@@ -839,7 +822,7 @@ describe('CanvasEditorRuntime', () => {
       ]
     });
 
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/a.png'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/a.png'] });
     runtime.input.beginNodeMove({
       pointerId: 14,
       projectRelativePath: 'flow/b.png',
@@ -849,7 +832,6 @@ describe('CanvasEditorRuntime', () => {
     runtime.input.updatePointerInteraction({ pointerId: 14, screenPoint: { x: 10, y: 0 } });
     runtime.input.cancelPointerInteraction(14);
     expect(runtime.getSnapshot().selection).toEqual({
-      kind: 'nodes',
       projectRelativePaths: ['flow/a.png']
     });
     expect(runtime.scene.getPresentedNodes().get('flow/a.png')).toMatchObject({ x: 20, y: 35 });
@@ -864,7 +846,7 @@ describe('CanvasEditorRuntime', () => {
     const runtime = createCanvasEditorRuntime({
       initialProjection: { nodes: base, edges: [] },
       submitManualLayout: async () => undefined,
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+      selection: { projectRelativePaths: ['flow/a.png'] }
     });
 
     runtime.input.beginNodeMove({
@@ -881,7 +863,6 @@ describe('CanvasEditorRuntime', () => {
 
     expect(runtime.getSnapshot()).toMatchObject({
       selection: {
-        kind: 'nodes',
         projectRelativePaths: ['flow/a.png', 'flow/b.png']
       },
       pointerInteraction: {
@@ -916,7 +897,7 @@ describe('CanvasEditorRuntime', () => {
     expect(updated).toBe(true);
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]).toMatchObject({
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] },
+      selection: { projectRelativePaths: ['flow/a.png'] },
       contentInteractionProjectRelativePath: undefined,
       pointerInteraction: { kind: 'move-node', phase: 'active' }
     });
@@ -1083,11 +1064,11 @@ describe('CanvasEditorRuntime', () => {
 
     runtime.activateContent('flow/a.md');
     expect(runtime.getSnapshot()).toMatchObject({
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      selection: { projectRelativePaths: ['flow/a.md'] },
       contentInteractionProjectRelativePath: 'flow/a.md'
     });
     expect(snapshots).toHaveLength(1);
-    runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.md'] });
+    runtime.setSelection({ projectRelativePaths: ['flow/b.md'] });
 
     expect(runtime.getSnapshot().contentInteractionProjectRelativePath).toBeUndefined();
     expect(changes).toEqual(['flow/a.md', undefined]);
@@ -1118,7 +1099,7 @@ describe('CanvasEditorRuntime', () => {
     }]);
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]).toMatchObject({
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      selection: { projectRelativePaths: ['flow/a.md'] },
       contentInteractionProjectRelativePath: undefined,
       pointerInteraction: { kind: 'resize-node', phase: 'active' }
     });
@@ -1153,12 +1134,12 @@ describe('CanvasEditorRuntime', () => {
 
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]).toMatchObject({
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      selection: { projectRelativePaths: ['flow/a.md'] },
       contentInteractionProjectRelativePath: 'flow/a.md',
       pointerInteraction: undefined
     });
     expect(selectionChanges).toEqual([{
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      selection: { projectRelativePaths: ['flow/a.md'] },
       pointerInteraction: undefined
     }]);
     expect(contentChanges).toEqual([{
@@ -1189,7 +1170,7 @@ describe('CanvasEditorRuntime', () => {
 
     runtime.input.cancelPointerInteraction(82);
     expect(runtime.getSnapshot()).toMatchObject({
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.md'] },
+      selection: { projectRelativePaths: ['flow/a.md'] },
       contentInteractionProjectRelativePath: 'flow/a.md',
       pointerInteraction: undefined
     });

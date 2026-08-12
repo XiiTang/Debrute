@@ -97,7 +97,7 @@ describe('CanvasMinimapBar', () => {
     const durableNode = nodeFixture('flow/a.png', 0, 0);
     const runtime = createRuntime({
       camera: { x: 0, y: 0, z: 1 },
-      selection: { kind: 'nodes', projectRelativePaths: [durableNode.projectRelativePath] },
+      selection: { projectRelativePaths: [durableNode.projectRelativePath] },
       nodes: [{ ...durableNode, width: 300, height: 160 }]
     });
     runtime.bindSurface({
@@ -176,7 +176,7 @@ describe('CanvasMinimapBar', () => {
     const runtime = createCanvasEditorRuntime({
       initialProjection: { nodes, edges: [] },
       submitManualLayout: async () => undefined,
-      selection: { kind: 'nodes', projectRelativePaths: ['flow/a.png'] }
+      selection: { projectRelativePaths: ['flow/a.png'] }
     });
     runtime.bindSurface({
       surface: fakeElement({ left: 0, top: 0, width: 1000, height: 500 }) as unknown as HTMLElement
@@ -194,8 +194,8 @@ describe('CanvasMinimapBar', () => {
         expect(container.querySelector('[data-minimap-node-path="flow/a.png"]')?.classList.contains('selected')).toBe(true);
 
         await act(async () => {
-          runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/b.png'] });
-          runtime.setSelection({ kind: 'nodes', projectRelativePaths: ['flow/c.png'] });
+          runtime.setSelection({ projectRelativePaths: ['flow/b.png'] });
+          runtime.setSelection({ projectRelativePaths: ['flow/c.png'] });
         });
 
         expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
@@ -292,7 +292,7 @@ function nodeFixture(path: string, x: number, y: number): CanvasProjection['node
 function runtimeFixture(projection?: CanvasProjection): CanvasEditorRuntime {
   const runtime = createRuntime({
     camera: { x: -100, y: -50, z: 0.5 },
-    selection: { kind: 'nodes', projectRelativePaths: ['flow/selected.png'] },
+    selection: { projectRelativePaths: ['flow/selected.png'] },
     nodes: projection?.nodes
   });
   runtime.bindSurface({
@@ -308,7 +308,7 @@ function createRuntime(input: {
 }): CanvasEditorRuntime {
   return createCanvasEditorRuntime({
     initialProjection: {
-      nodes: input.nodes ?? (input.selection?.kind === 'nodes'
+      nodes: input.nodes ?? (input.selection
         ? input.selection.projectRelativePaths.map((path) => nodeFixture(path, 0, 0))
         : []),
       edges: [],

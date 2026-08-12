@@ -61,7 +61,7 @@ export function createWorkbenchFocusCommandRouter(input: {
           explorer.clearCut();
           return true;
         }
-        if (runtime.getSnapshot().selection?.kind === 'nodes') {
+        if (runtime.getSnapshot().selection) {
           runtime.setSelection(undefined);
         }
         return true;

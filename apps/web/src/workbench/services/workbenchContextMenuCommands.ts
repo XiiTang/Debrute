@@ -54,6 +54,7 @@ export function runProjectPathCommand(input: {
   explorerCommands: ExplorerContextCommands;
   activities: WorkbenchActivityNoticeReporter;
   closeContextMenu: () => void;
+  inspectEntries: (entries: readonly ProjectPathEntry[]) => void;
   openInspectorPanel: () => void;
   confirmPermanentDelete: (input: { entries: ProjectPathEntry[] }) => boolean;
   confirmTrash: (input: { entries: ProjectPathEntry[] }) => boolean;
@@ -65,6 +66,16 @@ export function runProjectPathCommand(input: {
 }): void {
   const target = input.contextMenu?.target;
   if (!target) {
+    return;
+  }
+
+  if (input.command === 'inspect') {
+    const entries = resolveProjectPathCommandTarget(target).selectionEntries;
+    if (entries.length > 0) {
+      input.inspectEntries(entries);
+      input.openInspectorPanel();
+    }
+    input.closeContextMenu();
     return;
   }
 
@@ -91,12 +102,6 @@ export function runProjectPathCommand(input: {
 
   const node = projectedContextMenuNode(input.canvasProjection, projectRelativePath);
   if (!node) {
-    input.closeContextMenu();
-    return;
-  }
-
-  if (input.command === 'show-details') {
-    input.openInspectorPanel();
     input.closeContextMenu();
     return;
   }

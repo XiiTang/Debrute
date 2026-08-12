@@ -1,28 +1,30 @@
+import { useSyncExternalStore } from 'react';
 import type { WorkbenchLocale } from '@debrute/app-protocol';
-import '../styles/inspector.css';
 import type { WorkbenchActions, WorkbenchState } from '../../types';
-import type { CanvasEditorRuntime } from '../canvas/runtime/CanvasEditorRuntime';
 import { I18nProvider } from '../i18n/index';
+import '../styles/inspector.css';
 import { Inspector } from './Inspector';
+import type { InspectionTargetStore } from './inspectionTarget';
 
 export function WorkbenchInspectorPanelFeature({
   locale,
   state,
-  canvasRuntime,
+  targetStore,
   actions
 }: {
   locale: WorkbenchLocale;
   state: WorkbenchState;
-  canvasRuntime: CanvasEditorRuntime | undefined;
+  targetStore: InspectionTargetStore;
   actions: WorkbenchActions;
 }): React.ReactElement {
+  const target = useSyncExternalStore(
+    targetStore.subscribe,
+    targetStore.getSnapshot,
+    targetStore.getSnapshot
+  );
   return (
     <I18nProvider locale={locale}>
-      <Inspector
-        state={state}
-        selection={canvasRuntime?.getSnapshot().selection}
-        actions={actions}
-      />
+      <Inspector target={target} state={state} actions={actions} />
     </I18nProvider>
   );
 }

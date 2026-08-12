@@ -32,8 +32,10 @@ import { FeedbackPanel } from './feedback/FeedbackPanel';
 import type { CanvasEditorRuntime } from './canvas/runtime/CanvasEditorRuntime';
 import type { CanvasVideoMetadataUpdate } from './canvas/CanvasVideoPreviewRuntime';
 import {
-  canvasNodeSelection
+  canvasNodeSelection,
+  selectedNodeProjectRelativePaths
 } from './canvas/runtime/canvasSelection';
+import { createInspectionTargetStore } from './inspector/inspectionTarget';
 import {
   currentDebruteWorkbenchRoute,
   replaceWorkbenchProjectRoute,
@@ -90,6 +92,7 @@ import {
   type WorkbenchContextMenuTarget
 } from './shell/contextMenu';
 import type { ProjectTreeFileKeyboardCommand } from './project-explorer/projectTreeKeyboardCommands';
+import type { ProjectTreeSelectionState } from './project-explorer/projectTreeInteraction';
 import type { WorkbenchProjectProjectionState } from './services/WorkbenchProjectProjection';
 import {
   projectPathDeletionConfirmationMessageForEntries,
@@ -196,7 +199,7 @@ const WorkbenchExplorerPanelFeature = React.lazy(async () => {
 });
 const WorkbenchInspectorPanelFeature = React.lazy(async () => {
   workbenchStartupTimeline.markFeatureRequested('inspector');
-  const module = await import('./shell/InspectorPanelFeature');
+  const module = await import('./inspector/InspectorPanelFeature');
   workbenchStartupTimeline.markFeatureReady('inspector');
   return { default: module.WorkbenchInspectorPanelFeature };
 });
@@ -566,6 +569,10 @@ function WorkbenchBoundProjectApp({
   const [mountedCanvasRuntime, setMountedCanvasRuntime] = useState<CanvasEditorRuntime>();
   const focusCommandRouterRef = useRef<WorkbenchFocusCommandRouter | undefined>(undefined);
   const canvasRuntimeScopeKey = projectProjection.generation;
+  const inspectionTargetStore = useMemo(
+    () => createInspectionTargetStore(),
+    [projectProjection.generation]
+  );
   const canvasStateChangeIntake = useMemo(
     () => createCanvasStateChangeIntake(),
     [canvasRuntimeScopeKey]
@@ -636,6 +643,17 @@ function WorkbenchBoundProjectApp({
     : undefined;
   const canvasState = availableCanvasWorkspace?.workspace;
   const canvasRuntime = mountedCanvasRuntime;
+  useEffect(() => {
+    if (!canvasRuntime) {
+      return;
+    }
+    inspectionTargetStore.publishPaths(selectedNodeProjectRelativePaths(
+      canvasRuntime.getSnapshot().selection
+    ));
+    return canvasRuntime.subscribeSelection((selection) => {
+      inspectionTargetStore.publishPaths(selectedNodeProjectRelativePaths(selection));
+    });
+  }, [canvasRuntime, inspectionTargetStore]);
   const handleWorkbenchCompletedClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!canvasRuntime) {
       return;
@@ -912,6 +930,7 @@ function WorkbenchBoundProjectApp({
       }
 
       if (event.type === 'project.fileChanged') {
+        inspectionTargetStore.invalidatePath(event.event.projectRelativePath);
         void refreshTextFileBuffer(event.event.projectRelativePath);
         if (event.event.projectRelativePath === '.debrute/feedback/feedback.json') {
           void feedbackInteraction.load();
@@ -922,6 +941,7 @@ function WorkbenchBoundProjectApp({
     canvasStateChangeIntake,
     feedbackInteraction.applyEvent,
     feedbackInteraction.load,
+    inspectionTargetStore,
     refreshTextFileBuffer
   ]);
 
@@ -1113,6 +1133,9 @@ function WorkbenchBoundProjectApp({
   const openInspectorPanel = useCallback(() => {
     windowHostRef.current?.openPanel('inspector');
   }, []);
+  const publishExplorerInspectionSelection = useCallback((selection: ProjectTreeSelectionState) => {
+    inspectionTargetStore.publishPaths(selection.selectedPaths);
+  }, [inspectionTargetStore]);
 
   const effectiveTitleBarState = useMemo(() => buildWorkbenchTitleBarState({
     platform: productPlatform,
@@ -1175,6 +1198,8 @@ function WorkbenchBoundProjectApp({
 
   const actions: WorkbenchActions = useMemo(() => ({
     lookupModelArtifactProvenance: api.lookupModelArtifactProvenance,
+    inspectProjectPath: api.inspectProjectPath,
+    resolveProjectFileSource: api.resolveProjectFileSource,
     readProjectTextFile: api.readProjectTextFile,
     resolveCanvasSources: api.resolveCanvasSources,
     writeProjectTextFile: api.writeProjectTextFile,
@@ -1336,6 +1361,9 @@ function WorkbenchBoundProjectApp({
       explorerCommands: explorerController,
       activities: projectActivities,
       closeContextMenu: closeWorkbenchContextMenu,
+      inspectEntries: (entries) => {
+        inspectionTargetStore.publishPaths(entries.map((entry) => entry.projectRelativePath));
+      },
       openInspectorPanel,
       confirmPermanentDelete,
       confirmTrash,
@@ -1357,6 +1385,7 @@ function WorkbenchBoundProjectApp({
     getAcceptedProjectSnapshot,
     explorerController,
     locateProjectFileInCanvas,
+    inspectionTargetStore,
     projectActivities,
     openProjectPathTerminalPanel,
     openInspectorPanel,
@@ -1571,6 +1600,7 @@ function WorkbenchBoundProjectApp({
             canvasRuntime={canvasRuntime}
             activities={projectActivities}
             i18n={i18n}
+            onInspectionSelectionChange={publishExplorerInspectionSelection}
             onController={setExplorerController}
           />
         </React.Suspense>
@@ -1761,7 +1791,7 @@ function WorkbenchBoundProjectApp({
                         <WorkbenchInspectorPanelFeature
                           locale={presentationController.locale}
                           state={state}
-                          canvasRuntime={canvasRuntime}
+                          targetStore={inspectionTargetStore}
                           actions={actions}
                         />
                       </React.Suspense>
