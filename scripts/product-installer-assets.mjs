@@ -1,28 +1,13 @@
 import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { productInstallerAssetName } from './release-asset-contract.mjs';
-
-export function electronBuilderPlatformName(platform) {
-  if (platform === 'darwin') return 'macos';
-  if (platform === 'win32') return 'windows';
-  throw new Error(`Unsupported Product Installer platform: ${platform}`);
-}
+import {
+  productInstallerAssetName,
+  resolveHostProductReleaseTarget
+} from './release-asset-contract.mjs';
 
 export function requiredProductInstallerAssets(version, platform = process.platform, arch = process.arch) {
-  const publicPlatform = electronBuilderPlatformName(platform);
-  if (platform === 'darwin') {
-    if (arch !== 'arm64' && arch !== 'x64') {
-      throw new Error(`Unsupported macOS release arch: ${arch}`);
-    }
-    return [productInstallerAssetName(version, publicPlatform, arch, 'dmg')];
-  }
-  if (platform === 'win32') {
-    if (arch !== 'x64') {
-      throw new Error(`Unsupported Windows release arch: ${arch}`);
-    }
-    return [productInstallerAssetName(version, publicPlatform, arch, 'exe')];
-  }
-  throw new Error(`Unsupported Product Installer platform: ${platform}`);
+  const target = resolveHostProductReleaseTarget(platform, arch);
+  return [productInstallerAssetName(version, target)];
 }
 
 export async function verifyProductInstallerAssets({

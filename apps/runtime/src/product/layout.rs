@@ -123,6 +123,14 @@ impl InstalledProductLayout {
     }
 
     #[must_use]
+    pub fn cli_path(&self) -> PathBuf {
+        match self.platform {
+            CommitPlatform::Macos => self.bin_directory.join("debrute"),
+            CommitPlatform::Windows => self.bin_directory.join("debrute.cmd"),
+        }
+    }
+
+    #[must_use]
     pub fn skills_directory(&self) -> &Path {
         &self.skills_directory
     }

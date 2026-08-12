@@ -167,11 +167,8 @@ impl ProductInstallationCoordinator {
         fs::create_dir_all(self.layout.bin_directory())?;
         let runtime_entrypoint =
             install_runtime_entrypoint(self.layout.bin_directory(), &current_runtime)?;
-        let cli_entrypoint = install_cli_entrypoint(
-            self.layout.bin_directory(),
-            &current_cli,
-            &runtime_entrypoint,
-        )?;
+        let cli_entrypoint =
+            install_cli_entrypoint(&self.layout.cli_path(), &current_cli, &runtime_entrypoint)?;
         ProductProjectionManager::publish_official_skills(
             &directory.join("skills"),
             self.layout.skills_directory(),
@@ -207,12 +204,12 @@ impl ProductInstallationCoordinator {
         #[cfg(target_os = "macos")]
         let (runtime_entrypoint, cli_entrypoint) = (
             self.layout.bin_directory().join("debrute-runtime"),
-            self.layout.bin_directory().join("debrute"),
+            self.layout.cli_path(),
         );
         #[cfg(target_os = "windows")]
         let (runtime_entrypoint, cli_entrypoint) = (
             current.join("runtime/debrute-runtime.exe"),
-            self.layout.bin_directory().join("debrute.cmd"),
+            self.layout.cli_path(),
         );
         ActivatedProduct {
             product_version: directory
@@ -321,39 +318,37 @@ fn install_runtime_entrypoint(
 
 #[cfg(target_os = "windows")]
 fn install_cli_entrypoint(
-    bin_directory: &Path,
+    destination: &Path,
     current_cli: &Path,
     runtime_entrypoint: &Path,
 ) -> Result<PathBuf, ProductInstallationError> {
-    let destination = bin_directory.join("debrute.cmd");
     let path = current_cli.to_string_lossy().replace('%', "%%");
     let runtime = runtime_entrypoint.to_string_lossy().replace('%', "%%");
     write_file_atomic(
-        &destination,
+        destination,
         format!(
             "@echo off\r\nset \"DEBRUTE_RUNTIME_STABLE_ENTRYPOINT={runtime}\"\r\n\"{path}\" %*\r\n"
         )
         .as_bytes(),
     )?;
-    Ok(destination)
+    Ok(destination.to_owned())
 }
 
 #[cfg(target_os = "macos")]
 fn install_cli_entrypoint(
-    bin_directory: &Path,
+    destination: &Path,
     current_cli: &Path,
     runtime_entrypoint: &Path,
 ) -> Result<PathBuf, ProductInstallationError> {
-    let destination = bin_directory.join("debrute");
     let target = shell_escaped_path(current_cli)?;
     let runtime = shell_escaped_path(runtime_entrypoint)?;
     write_unix_script(
-        &destination,
+        destination,
         &format!(
             "#!/bin/sh\nexport DEBRUTE_RUNTIME_STABLE_ENTRYPOINT='{runtime}'\nexec '{target}' \"$@\"\n"
         ),
     )?;
-    Ok(destination)
+    Ok(destination.to_owned())
 }
 
 #[cfg(target_os = "macos")]

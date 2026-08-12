@@ -4,12 +4,12 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
-use crate::model_request::types::ModelExecutionDraft;
-use crate::model_request::video::{download_image, download_video};
 use crate::{
     model_request::{
         common::{ExecutionContext, ResolvedMediaReference, join_url},
-        types::{HttpBody, HttpMethod, ModelRequestError},
+        image::download_image,
+        types::{HttpBody, HttpMethod, ModelExecutionDraft, ModelRequestError},
+        video::download_video,
     },
     project::{CanvasMediaKind, project_media_kind_from_content_type},
 };

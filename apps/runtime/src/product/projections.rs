@@ -74,11 +74,7 @@ impl ProductProjectionManager {
         #[cfg(target_os = "macos")]
         {
             let shell = Self::current_login_shell()?;
-            Self::verify_macos_command_resolution(
-                &shell,
-                layout.user_home(),
-                &layout.bin_directory().join("debrute"),
-            )
+            Self::verify_macos_command_resolution(&shell, layout.user_home(), &layout.cli_path())
         }
         #[cfg(target_os = "windows")]
         {
@@ -362,8 +358,8 @@ fn verify_windows_command_resolution(
         .arg("debrute")
         .env("PATH", fresh_path)
         .output()?;
-    let expected =
-        normalize_windows_path_entry(&layout.bin_directory().join("debrute.cmd").to_string_lossy());
+    let cli_path = layout.cli_path();
+    let expected = normalize_windows_path_entry(&cli_path.to_string_lossy());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let actual = stdout.lines().find(|line| !line.trim().is_empty());
     if output.status.success()
@@ -372,7 +368,7 @@ fn verify_windows_command_resolution(
         return Ok(());
     }
     Err(ProductProjectionError::CommandResolutionMismatch {
-        expected: layout.bin_directory().join("debrute.cmd"),
+        expected: cli_path,
         actual: stdout.trim().to_owned(),
     })
 }

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +15,7 @@ export function photoshopUxpReleaseAssetName(version) {
 }
 
 export async function packagePhotoshopUxpPlugin({ outDir = join(workspaceRoot, 'release', 'photoshop-uxp') } = {}) {
-  await validateReleaseVersionContract(workspaceRoot);
-  const version = JSON.parse(await readFile(join(workspaceRoot, 'package.json'), 'utf8')).version;
+  const { version } = await validateReleaseVersionContract(workspaceRoot);
   const buildCommand = packageManagerCommand(workspaceRoot, ['--filter', '@debrute/photoshop-uxp-plugin', 'build']);
   await execFileAsync(buildCommand.command, buildCommand.args, { cwd: workspaceRoot });
   await rm(outDir, { recursive: true, force: true });
