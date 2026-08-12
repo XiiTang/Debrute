@@ -140,14 +140,15 @@ node-selection commands. Modifier clicks in a Node Manipulation Region retain
 the ordinary Canvas additive-selection contract.
 
 Video playback remains distinct from Content Activation. Losing activation,
-changing Selection, or pressing Escape does not implicitly pause, seek, or
-persist a new Playback Position. A playing video may retain its live player
-while content-inactive, without Canvas video hotkeys;
-explicit player, playback-boundary, and Feedback seek-or-pause actions continue
-to own playback changes. Audio playback likewise does not follow Selection or
-Activation. Its player remains mounted when Activation ends, preserving the
-browser playback, current-time, and buffered state without adding an unload and
-restore lifecycle.
+changing Selection, or pressing Escape does not implicitly pause or seek. A
+playing video may retain its live player while content-inactive, without Canvas
+video hotkeys. Pausing, seeking, or ending while the player remains
+content-active does not by itself persist a Playback Position or produce a
+preview; player and Feedback actions continue to own those live playback
+changes, while unloading owns Playback Position capture. Audio playback
+likewise does not follow Selection or Activation. Its player remains mounted
+when Activation ends, preserving the browser playback, current-time, and
+buffered state without adding an unload and restore lifecycle.
 
 Content Activation remains singular while video playback is zero-to-many. A
 video player is eligible to hand off to its derived preview and unload only when
@@ -158,10 +159,10 @@ starting a second video does not pause or unload the first.
 
 The editor-to-preview and paused-video-to-preview handoffs keep the existing
 editor or player mounted until the preview has actually committed. If the node
-is reactivated first, reactivation only invalidates that pending retirement and
+is reactivated first, reactivation only invalidates that pending unload and
 reuses the still-mounted instance; no duplicate instance, synthetic event
 replay, or second restoration path is introduced. A preview result that
-finishes later may remain cached, but its stale retirement callback cannot
+finishes later may remain cached, but its stale unload callback cannot
 replace reactivated content. If preview ownership and unload already committed,
 the next activation follows the normal fresh-mount path.
 

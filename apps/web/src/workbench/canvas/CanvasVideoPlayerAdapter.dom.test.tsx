@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
-  it('keeps only Feedback and playback-restoration operations on the Canvas handle', async () => {
+  it('keeps only live playback operations on the Canvas handle', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -73,14 +73,12 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={0}
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
       expect(Object.keys(ref.current ?? {}).sort()).toEqual([
         'pauseAt',
-        'readCurrentTimeSeconds',
-        'restorePersistedTime'
+        'readCurrentTimeSeconds'
       ]);
     } finally {
       await act(async () => {
@@ -103,7 +101,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={0}
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -121,7 +118,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             contentInteractionActive
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -148,7 +144,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={0}
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -170,7 +165,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             playbackToggleRequest={{ requestId: 1 }}
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -184,7 +178,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             playbackToggleRequest={{ requestId: 1 }}
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -198,7 +191,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             playbackToggleRequest={{ requestId: 2 }}
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -225,7 +217,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={0}
             onError={onError}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -249,7 +240,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             playbackToggleRequest={{ requestId: 1 }}
             onError={onError}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -277,12 +267,15 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={0}
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
             onReadyForDisplay={onReadyForDisplay}
           />
         );
       });
       const video = requiredVideo(container);
+      Object.defineProperty(video, 'readyState', {
+        configurable: true,
+        value: HTMLMediaElement.HAVE_CURRENT_DATA
+      });
 
       act(() => {
         video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
@@ -306,6 +299,117 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
     }
   });
 
+  it('reports display readiness when the mounted media already has display data', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onReadyForDisplay = vi.fn();
+    vi.spyOn(HTMLMediaElement.prototype, 'readyState', 'get')
+      .mockReturnValue(HTMLMediaElement.HAVE_CURRENT_DATA);
+
+    try {
+      await act(async () => {
+        root.render(
+          <TestCanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeMs={0}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onReadyForDisplay={onReadyForDisplay}
+          />
+        );
+      });
+
+      expect(onReadyForDisplay).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('restores a nonzero timestamp when cached media readiness events were missed', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onReadyForDisplay = vi.fn();
+    const animationFrames: FrameRequestCallback[] = [];
+    const requestFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    vi.spyOn(HTMLMediaElement.prototype, 'readyState', 'get')
+      .mockReturnValue(HTMLMediaElement.HAVE_CURRENT_DATA);
+
+    try {
+      await act(async () => {
+        root.render(
+          <TestCanvasVideoPlayerAdapter
+            node={videoNode({ durationSeconds: 10 })}
+            initialTimeMs={4_500}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onReadyForDisplay={onReadyForDisplay}
+          />
+        );
+      });
+
+      expect(requiredVideo(container).currentTime).toBe(4.5);
+      expect(onReadyForDisplay).not.toHaveBeenCalled();
+      expect(requestFrame).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        animationFrames[0]?.(0);
+      });
+
+      expect(onReadyForDisplay).toHaveBeenCalledTimes(1);
+      expect(requestFrame).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it('reports display readiness from playing after an earlier readiness event was missed', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onReadyForDisplay = vi.fn();
+
+    try {
+      await act(async () => {
+        root.render(
+          <TestCanvasVideoPlayerAdapter
+            node={videoNode()}
+            initialTimeMs={0}
+            onError={() => undefined}
+            onPlayingChange={() => undefined}
+            onReadyForDisplay={onReadyForDisplay}
+          />
+        );
+      });
+      const video = requiredVideo(container);
+      Object.defineProperty(video, 'readyState', {
+        configurable: true,
+        value: HTMLMediaElement.HAVE_CURRENT_DATA
+      });
+
+      act(() => {
+        video.dispatchEvent(new Event('playing', { bubbles: true }));
+      });
+
+      expect(onReadyForDisplay).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('reports display readiness after the initial timestamp seek completes', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -320,12 +424,15 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={4_500}
             onError={() => undefined}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
             onReadyForDisplay={onReadyForDisplay}
           />
         );
       });
       const video = requiredVideo(container);
+      Object.defineProperty(video, 'readyState', {
+        configurable: true,
+        value: HTMLMediaElement.HAVE_CURRENT_DATA
+      });
 
       act(() => {
         video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
@@ -333,6 +440,13 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
       expect(video.currentTime).toBe(4.5);
       expect(onReadyForDisplay).not.toHaveBeenCalled();
 
+      video.currentTime = 2;
+      act(() => {
+        video.dispatchEvent(new Event('seeked', { bubbles: true }));
+      });
+      expect(onReadyForDisplay).not.toHaveBeenCalled();
+
+      video.currentTime = 4.5;
       act(() => {
         video.dispatchEvent(new Event('seeked', { bubbles: true }));
       });
@@ -360,12 +474,15 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={6_250}
             onError={onError}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
             onReadyForDisplay={onReadyForDisplay}
           />
         );
       });
       const video = requiredVideo(container);
+      Object.defineProperty(video, 'readyState', {
+        configurable: true,
+        value: HTMLMediaElement.HAVE_CURRENT_DATA
+      });
 
       act(() => {
         video.dispatchEvent(new Event('loadedmetadata', { bubbles: true }));
@@ -388,12 +505,11 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('seeks to the initial time and reports playback boundary events', async () => {
+  it('keeps pause, seek, and ended events local to the live player', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
     const onPlayingChange = vi.fn();
-    const onPlaybackBoundary = vi.fn();
 
     try {
       await act(async () => {
@@ -403,7 +519,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={4_500}
             onError={() => undefined}
             onPlayingChange={onPlayingChange}
-            onPlaybackBoundary={onPlaybackBoundary}
           />
         );
       });
@@ -429,14 +544,18 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
         video.dispatchEvent(new Event('pause', { bubbles: true }));
       });
       expect(onPlayingChange).toHaveBeenLastCalledWith(false);
-      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(6_250);
+
+      act(() => {
+        video.dispatchEvent(new Event('seeked', { bubbles: true }));
+      });
+      expect(video.currentTime).toBe(6.25);
 
       video.currentTime = 8;
       act(() => {
         video.dispatchEvent(new Event('ended', { bubbles: true }));
       });
       expect(video.currentTime).toBe(0);
-      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(0);
+      expect(onPlayingChange).toHaveBeenLastCalledWith(false);
     } finally {
       await act(async () => {
         root.unmount();
@@ -445,55 +564,11 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
     }
   });
 
-  it('reports playback boundary events when a paused seek completes', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const onPlaybackBoundary = vi.fn();
-
-    try {
-      await act(async () => {
-        root.render(
-          <TestCanvasVideoPlayerAdapter
-            node={videoNode()}
-            initialTimeMs={0}
-            onError={() => undefined}
-            onPlayingChange={() => undefined}
-            onPlaybackBoundary={onPlaybackBoundary}
-          />
-        );
-      });
-      const video = requiredVideo(container);
-
-      video.currentTime = 6.25;
-      act(() => {
-        video.dispatchEvent(new Event('seeked', { bubbles: true }));
-      });
-
-      expect(onPlaybackBoundary).toHaveBeenCalledTimes(1);
-      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(6_250);
-
-      video.currentTime = 0;
-      act(() => {
-        video.dispatchEvent(new Event('seeked', { bubbles: true }));
-      });
-
-      expect(onPlaybackBoundary).toHaveBeenCalledTimes(2);
-      expect(onPlaybackBoundary).toHaveBeenLastCalledWith(0);
-    } finally {
-      await act(async () => {
-        root.unmount();
-      });
-      container.remove();
-    }
-  });
-
-  it('restores the persisted time after a failed commit without publishing another update', async () => {
+  it('keeps pauseAt on the live player without publishing persistence', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
     const ref = React.createRef<CanvasVideoPlayerHandle>();
-    const onPlaybackBoundary = vi.fn();
     const onPlayingChange = vi.fn();
 
     try {
@@ -505,21 +580,20 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={0}
             onError={() => undefined}
             onPlayingChange={onPlayingChange}
-            onPlaybackBoundary={onPlaybackBoundary}
           />
         );
       });
       const video = requiredVideo(container);
-      Object.defineProperty(video, 'pause', { configurable: true, value: vi.fn() });
+      const pause = vi.fn();
+      Object.defineProperty(video, 'pause', { configurable: true, value: pause });
 
       act(() => {
-        ref.current?.restorePersistedTime(3_250);
-        video.dispatchEvent(new Event('seeked', { bubbles: true }));
+        ref.current?.pauseAt(6.25);
       });
 
-      expect(video.currentTime).toBe(3.25);
+      expect(pause).toHaveBeenCalledTimes(1);
+      expect(video.currentTime).toBe(6.25);
       expect(onPlayingChange).toHaveBeenLastCalledWith(false);
-      expect(onPlaybackBoundary).not.toHaveBeenCalled();
     } finally {
       await act(async () => {
         root.unmount();
@@ -542,7 +616,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={6_250}
             onError={onError}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });
@@ -580,7 +653,6 @@ describe('CanvasVideoPlayerAdapter', { tags: ['canvas-video'] }, () => {
             initialTimeMs={4_500}
             onError={onError}
             onPlayingChange={() => undefined}
-            onPlaybackBoundary={() => undefined}
           />
         );
       });

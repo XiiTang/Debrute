@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Video } from '../ui/index';
+import { normalizeCanvasVideoPlaybackTimeMs } from '@debrute/canvas-core';
 import type { CanvasFeedbackEntry, CanvasFeedbackGeometry, CanvasFeedbackSpatialItem } from '@debrute/app-protocol';
 import type { ProjectedCanvasNode } from './CanvasScene';
 import { useI18n } from '../i18n';
@@ -21,6 +22,12 @@ const CanvasVideoPlayerAdapter = React.lazy(async () => {
 });
 
 type CanvasVideoVisibleLayer = 'preview' | 'player';
+
+interface CanvasVideoUnloadAttempt {
+  token: number;
+  currentTimeMs: number;
+  status: 'saving' | 'confirmed' | 'blocked';
+}
 
 export interface CanvasVideoNodeContentProps {
   node: ProjectedCanvasNode;
@@ -87,20 +94,34 @@ export function CanvasVideoNodeContent({
   const sourceResetLayerRef = useRef<CanvasVideoVisibleLayer>(initialVisibleLayer);
   const lastActivationRequestIdRef = useRef<number | undefined>(undefined);
   const [playbackToggleRequest, setPlaybackToggleRequest] = useState<CanvasVideoPlaybackToggleRequest>();
-  const [previewRetirementTimeMs, setPreviewRetirementTimeMs] = useState(projectedPlaybackTimeMs);
-  const playbackBoundaryVersionRef = useRef(0);
+  const playerTargetRef = useRef<CanvasVideoPlayerHandle | null>(null);
+  const [playerReadyForDisplay, setPlayerReadyForDisplay] = useState(false);
+  const unloadAttemptTokenRef = useRef(0);
+  const unloadAttemptRef = useRef<CanvasVideoUnloadAttempt | undefined>(undefined);
+  const [unloadAttempt, setUnloadAttempt] = useState<CanvasVideoUnloadAttempt>();
   const playingRef = useRef(false);
   const previousPlayerSourceIdentityRef = useRef(playerSourceIdentity);
 
   targetLayerRef.current = targetLayer;
   sourceResetLayerRef.current = contentInteractionActive || forcePlayerMounted ? 'player' : 'preview';
 
-  const register = useCallback((target: CanvasVideoPlayerHandle | null) => {
+  const registerPlayerHandle = useCallback((target: CanvasVideoPlayerHandle | null) => {
+    playerTargetRef.current = target;
     onRegisterVideoTarget(node.projectRelativePath, target ?? undefined);
     if (target) {
       onPlayerMounted?.(node.projectRelativePath);
     }
   }, [node.projectRelativePath, onPlayerMounted, onRegisterVideoTarget]);
+
+  const setCurrentUnloadAttempt = useCallback((attempt: CanvasVideoUnloadAttempt | undefined) => {
+    unloadAttemptRef.current = attempt;
+    setUnloadAttempt(attempt);
+  }, []);
+
+  const invalidateUnloadAttempt = useCallback(() => {
+    unloadAttemptTokenRef.current += 1;
+    setCurrentUnloadAttempt(undefined);
+  }, [setCurrentUnloadAttempt]);
 
   useEffect(() => {
     const sourceChanged = previousPlayerSourceIdentityRef.current !== playerSourceIdentity;
@@ -114,15 +135,15 @@ export function CanvasVideoNodeContent({
     setRetryKey(0);
     setPlaying(false);
     setPlaybackToggleRequest(undefined);
-    playbackBoundaryVersionRef.current += 1;
-    setPreviewRetirementTimeMs(projectedPlaybackTimeMs);
+    invalidateUnloadAttempt();
+    setPlayerReadyForDisplay(false);
     const resetLayer = sourceResetLayerRef.current;
     setVisibleLayer(resetLayer);
     setPlayerMounted(resetLayer === 'player');
     if (wasPlaying) {
       onPlayingChange?.(node.projectRelativePath, false);
     }
-  }, [playerSourceIdentity, node.projectRelativePath, onPlayingChange, projectedPlaybackTimeMs]);
+  }, [invalidateUnloadAttempt, playerSourceIdentity, node.projectRelativePath, onPlayingChange]);
 
   useEffect(() => {
     if (contentInteractionActive && node.availability.state !== 'available') {
@@ -155,34 +176,20 @@ export function CanvasVideoNodeContent({
       setPlayerMounted(true);
     }
   }, [node.projectRelativePath, onPlayingChange]);
-  const handlePlaybackBoundary = useCallback((currentTimeMs: number) => {
-    playbackBoundaryVersionRef.current += 1;
-    const boundaryVersion = playbackBoundaryVersionRef.current;
-    setPreviewRetirementTimeMs(currentTimeMs);
-    void Promise.resolve(onUpdatePlaybackTime(node.projectRelativePath, currentTimeMs)).catch(() => {
-      if (playbackBoundaryVersionRef.current === boundaryVersion) {
-        setPreviewRetirementTimeMs(projectedPlaybackTimeMs);
-      }
-    });
-    if (currentTimeMs === 0) {
-      playingRef.current = false;
-      setPlaying(false);
-      onPlayingChange?.(node.projectRelativePath, false);
-      return;
-    }
-  }, [node.projectRelativePath, onPlayingChange, onUpdatePlaybackTime, projectedPlaybackTimeMs]);
   const handleTerminalError = useCallback((message: string) => {
     const wasPlaying = playingRef.current;
     playingRef.current = false;
     setPlaying(false);
     setPlaybackToggleRequest(undefined);
+    invalidateUnloadAttempt();
+    setPlayerReadyForDisplay(false);
     setPlayerMounted(false);
     setError(message);
     if (wasPlaying) {
       onPlayingChange?.(node.projectRelativePath, false);
     }
     onContentError(node.projectRelativePath);
-  }, [node.projectRelativePath, onContentError, onPlayingChange]);
+  }, [invalidateUnloadAttempt, node.projectRelativePath, onContentError, onPlayingChange]);
   const retryVideoPreviewSource = useCallback(() => {
     retryPreview(node.projectRelativePath);
   }, [node.projectRelativePath, retryPreview]);
@@ -237,31 +244,123 @@ export function CanvasVideoNodeContent({
     if (targetLayer !== 'player' || error) {
       return;
     }
+    invalidateUnloadAttempt();
+    if (!playerMounted) {
+      setPlayerReadyForDisplay(false);
+    }
     setPlayerMounted(true);
     if (!rasterPreview.hasVisible || rasterPreview.failure) {
       setVisibleLayer('player');
     }
-  }, [error, rasterPreview.failure, rasterPreview.hasVisible, targetLayer]);
+  }, [error, invalidateUnloadAttempt, playerMounted, rasterPreview.failure, rasterPreview.hasVisible, targetLayer]);
 
   useEffect(() => {
     if (
       targetLayer !== 'preview'
-      || projectedPlaybackTimeMs !== previewRetirementTimeMs
+      || !playerMounted
+      || error
+      || unloadAttemptRef.current
+    ) {
+      return;
+    }
+    if (!playerReadyForDisplay) {
+      return;
+    }
+    const currentTimeSeconds = playerTargetRef.current?.readCurrentTimeSeconds();
+    const token = ++unloadAttemptTokenRef.current;
+    if (currentTimeSeconds === undefined) {
+      const blockedAttempt: CanvasVideoUnloadAttempt = {
+        token,
+        currentTimeMs: projectedPlaybackTimeMs,
+        status: 'blocked'
+      };
+      setCurrentUnloadAttempt(blockedAttempt);
+      setVisibleLayer('player');
+      return;
+    }
+    const currentTimeMs = normalizeCanvasVideoPlaybackTimeMs(Math.round(Math.max(0, currentTimeSeconds) * 1000));
+    const nextAttempt: CanvasVideoUnloadAttempt = {
+      token,
+      currentTimeMs,
+      status: currentTimeMs === projectedPlaybackTimeMs ? 'confirmed' : 'saving'
+    };
+    setCurrentUnloadAttempt(nextAttempt);
+    if (nextAttempt.status === 'confirmed') {
+      return;
+    }
+    void Promise.resolve(onUpdatePlaybackTime(node.projectRelativePath, currentTimeMs)).then(() => {
+      const currentAttempt = unloadAttemptRef.current;
+      if (
+        currentAttempt?.token !== token
+        || targetLayerRef.current !== 'preview'
+      ) {
+        return;
+      }
+      const confirmedAttempt: CanvasVideoUnloadAttempt = { ...currentAttempt, status: 'confirmed' };
+      setCurrentUnloadAttempt(confirmedAttempt);
+    }, () => {
+      const currentAttempt = unloadAttemptRef.current;
+      if (
+        currentAttempt?.token !== token
+        || targetLayerRef.current !== 'preview'
+      ) {
+        return;
+      }
+      const blockedAttempt: CanvasVideoUnloadAttempt = { ...currentAttempt, status: 'blocked' };
+      setCurrentUnloadAttempt(blockedAttempt);
+      setVisibleLayer('player');
+    });
+  }, [
+    error,
+    node.projectRelativePath,
+    onUpdatePlaybackTime,
+    playerMounted,
+    playerReadyForDisplay,
+    projectedPlaybackTimeMs,
+    rasterPreview.failure,
+    rasterPreview.hasVisible,
+    setCurrentUnloadAttempt,
+    targetLayer,
+    visibleLayer
+  ]);
+
+  useEffect(() => {
+    const currentAttempt = unloadAttemptRef.current;
+    if (!rasterPreview.failure || !currentAttempt || currentAttempt.status === 'blocked') {
+      return;
+    }
+    const blockedAttempt: CanvasVideoUnloadAttempt = {
+      ...currentAttempt,
+      status: 'blocked'
+    };
+    setCurrentUnloadAttempt(blockedAttempt);
+    setVisibleLayer('player');
+  }, [rasterPreview.failure, setCurrentUnloadAttempt]);
+
+  useEffect(() => {
+    if (
+      targetLayer !== 'preview'
+      || unloadAttempt?.status !== 'confirmed'
+      || projectedPlaybackTimeMs !== unloadAttempt.currentTimeMs
       || !rasterPreview.hasVisible
       || rasterPreview.failure
     ) {
       return;
     }
     setVisibleLayer('preview');
+    setPlayerReadyForDisplay(false);
     setPlayerMounted(false);
+    invalidateUnloadAttempt();
   }, [
-    previewRetirementTimeMs,
+    invalidateUnloadAttempt,
+    unloadAttempt,
     projectedPlaybackTimeMs,
     rasterPreview.failure,
     rasterPreview.hasVisible,
     targetLayer
   ]);
   const handlePlayerReadyForDisplay = useCallback(() => {
+    setPlayerReadyForDisplay(true);
     if (targetLayerRef.current === 'player') {
       setVisibleLayer('player');
     }
@@ -336,7 +435,7 @@ export function CanvasVideoNodeContent({
             <React.Suspense fallback={<div className="db-canvas-node-placeholder" aria-busy="true" />}>
               <CanvasVideoPlayerAdapter
                 key={`${node.availability.fileUrl}:${retryKey}`}
-                ref={register}
+                ref={registerPlayerHandle}
                 node={node}
                 initialTimeMs={initialTimeMs}
                 playbackToggleRequest={playbackToggleRequest}
@@ -345,7 +444,6 @@ export function CanvasVideoNodeContent({
                 formatSeekError={formatVideoSeekError}
                 onError={handleTerminalError}
                 onPlayingChange={handlePlayingChange}
-                onPlaybackBoundary={handlePlaybackBoundary}
                 onReadyForDisplay={handlePlayerReadyForDisplay}
                 onPlaybackToggleRequestConsumed={(requestId) => {
                   setPlaybackToggleRequest((current) => current?.requestId === requestId ? undefined : current);
