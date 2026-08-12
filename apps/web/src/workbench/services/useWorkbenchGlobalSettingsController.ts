@@ -159,6 +159,8 @@ function applyMutation(
   switch (mutation.operation) {
     case 'set-locale':
       return { ...settings, workbench: { ...settings.workbench, locale: mutation.locale } };
+    case 'set-start-at-login':
+      return settings;
     case 'set-theme-preference':
       return {
         ...settings,
@@ -213,6 +215,7 @@ function mutationSatisfied(
 ): boolean {
   switch (mutation.operation) {
     case 'set-locale': return settings.workbench.locale === mutation.locale;
+    case 'set-start-at-login': return settings.runtime.startAtLogin === mutation.enabled;
     case 'set-theme-preference': return settings.workbench.themePreference === mutation.themePreference;
     case 'set-canvas-text-appearance': return sameValue(settings.canvas.textAppearance, mutation.textAppearance);
     case 'set-hierarchy-edges-visible': return settings.canvas.hierarchyEdgesVisible === mutation.hierarchyEdgesVisible;
@@ -241,6 +244,7 @@ function mutationLaneKey(mutation: MutateDebruteGlobalSettingsInput): string {
 function mutationSupersessionKey(mutation: MutateDebruteGlobalSettingsInput): string | undefined {
   switch (mutation.operation) {
     case 'set-locale':
+    case 'set-start-at-login':
     case 'set-theme-preference':
     case 'set-canvas-text-appearance':
     case 'set-hierarchy-edges-visible':
@@ -256,7 +260,8 @@ function mutationSupersessionKey(mutation: MutateDebruteGlobalSettingsInput): st
 }
 
 function isImmediateMutation(mutation: MutateDebruteGlobalSettingsInput): boolean {
-  return mutation.operation !== 'set-photoshop-plugin-enabled'
+  return mutation.operation !== 'set-start-at-login'
+    && mutation.operation !== 'set-photoshop-plugin-enabled'
     && mutation.operation !== 'save-model-setting';
 }
 

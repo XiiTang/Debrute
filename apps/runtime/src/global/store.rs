@@ -194,6 +194,9 @@ pub enum GlobalSettingsMutation {
     SetLocale {
         locale: String,
     },
+    SetStartAtLogin {
+        enabled: bool,
+    },
     SetThemePreference {
         theme_preference: String,
     },
@@ -477,6 +480,9 @@ fn apply_mutation(
         GlobalSettingsMutation::SetLocale { locale } => {
             snapshot.settings.workbench.locale.clone_from(locale);
             validate_workbench(&snapshot.settings.workbench)?;
+        }
+        GlobalSettingsMutation::SetStartAtLogin { .. } => {
+            return validation("Start at Login must be applied by the Global Runtime.");
         }
         GlobalSettingsMutation::SetThemePreference { theme_preference } => {
             snapshot
@@ -950,6 +956,7 @@ fn set_secret_permissions(_path: &Path) -> Result<(), GlobalSettingsError> {
 pub enum GlobalSettingsError {
     Validation(String),
     Persistence(String),
+    Native(String),
     Io(io::Error),
     Json(serde_json::Error),
 }
@@ -957,7 +964,9 @@ pub enum GlobalSettingsError {
 impl fmt::Display for GlobalSettingsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Validation(message) | Self::Persistence(message) => formatter.write_str(message),
+            Self::Validation(message) | Self::Persistence(message) | Self::Native(message) => {
+                formatter.write_str(message)
+            }
             Self::Io(error) => error.fmt(formatter),
             Self::Json(error) => error.fmt(formatter),
         }
@@ -969,7 +978,7 @@ impl Error for GlobalSettingsError {
         match self {
             Self::Io(error) => Some(error),
             Self::Json(error) => Some(error),
-            Self::Validation(_) | Self::Persistence(_) => None,
+            Self::Validation(_) | Self::Persistence(_) | Self::Native(_) => None,
         }
     }
 }

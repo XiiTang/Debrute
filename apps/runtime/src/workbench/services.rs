@@ -23,6 +23,7 @@ use crate::{
         DebruteGlobalSettingsView, GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeEvent,
         GlobalRuntimeService,
     },
+    login::StartAtLoginSetting,
     model_operation::{
         ModelKind, ModelOperationExecution, ModelOperationService, ModelOperationSnapshot,
         OperationState,
@@ -177,10 +178,12 @@ impl WorkbenchRuntimeServices {
     pub fn compose(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
+        start_at_login: Arc<dyn StartAtLoginSetting>,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         Self::compose_with_project_watcher(
             debrute_home,
             runtime_state,
+            start_at_login,
             ProjectWatcherComposition::Production,
         )
     }
@@ -196,10 +199,12 @@ impl WorkbenchRuntimeServices {
     pub fn compose_for_integration_tests(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
+        start_at_login: Arc<dyn StartAtLoginSetting>,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         Self::compose_with_project_watcher(
             debrute_home,
             runtime_state,
+            start_at_login,
             ProjectWatcherComposition::Deterministic,
         )
     }
@@ -207,6 +212,7 @@ impl WorkbenchRuntimeServices {
     fn compose_with_project_watcher(
         debrute_home: impl AsRef<Path>,
         runtime_state: Arc<RuntimeControlState>,
+        start_at_login: Arc<dyn StartAtLoginSetting>,
         project_watcher: ProjectWatcherComposition,
     ) -> Result<Arc<Self>, RuntimeHttpServiceError> {
         let debrute_home = debrute_home.as_ref().to_path_buf();
@@ -255,10 +261,11 @@ impl WorkbenchRuntimeServices {
         let native_shell = Arc::new(ProjectNativeShellService::new(&workers));
         let catalog = Arc::new(ModelCatalog::bundled());
         let global_store = Arc::new(GlobalConfigStore::new(&debrute_home));
-        let global = Arc::new(GlobalRuntimeService::new(
+        let global = GlobalRuntimeService::new(
             Arc::clone(&global_store),
             Arc::clone(&catalog),
-        ));
+            start_at_login,
+        );
         let provenance = Arc::new(ModelArtifactProvenanceStore::new(&debrute_home));
         let model_request = Arc::new(ModelRequestExecutor::new(
             Arc::clone(&catalog),

@@ -536,6 +536,96 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     );
     expect((general.match(/class="settings-group"/g) ?? []).length).toBe(1);
     expect((about.match(/class="settings-group"/g) ?? []).length).toBe(2);
+    expect(general).toContain('Start at Login');
+    expect(general).toContain('Start Debrute Runtime when you log in. Workbench stays closed.');
+    expect(general).not.toContain('<h3>Startup</h3>');
+  });
+
+  it('keeps Start at Login accepted-only until the Runtime projection confirms it', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const save = deferred<void>();
+    const onSettingsChange = vi.fn(() => save.promise);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <GeneralSettingsPage
+              actions={actions()}
+              product={{ status: 'ready', value: productState() }}
+              settings={globalSettingsFixture()}
+              onSettingsChange={onSettingsChange}
+            />
+          </I18nProvider>
+        );
+      });
+
+      const startAtLogin = requireSwitchForLabel(container, 'Start at Login');
+      await act(async () => {
+        startAtLogin.click();
+        await Promise.resolve();
+      });
+      expect(onSettingsChange).toHaveBeenCalledWith({
+        operation: 'set-start-at-login',
+        enabled: true
+      });
+      expect(startAtLogin.disabled).toBe(true);
+      expect(startAtLogin.checked).toBe(false);
+
+      await act(async () => {
+        save.resolve();
+        await save.promise;
+        root.render(
+          <I18nProvider locale="en">
+            <GeneralSettingsPage
+              actions={actions()}
+              product={{ status: 'ready', value: productState() }}
+              settings={globalSettingsFixture({ runtime: { startAtLogin: true } })}
+              onSettingsChange={onSettingsChange}
+            />
+          </I18nProvider>
+        );
+      });
+      expect(requireSwitchForLabel(container, 'Start at Login').checked).toBe(true);
+    } finally {
+      await unmount(root, container);
+    }
+  });
+
+  it('shows the exact native Start at Login failure without changing the confirmed switch', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(
+          <I18nProvider locale="en">
+            <GeneralSettingsPage
+              actions={actions()}
+              product={{ status: 'ready', value: productState() }}
+              settings={globalSettingsFixture()}
+              onSettingsChange={vi.fn(async () => {
+                throw new Error('native write denied');
+              })}
+            />
+          </I18nProvider>
+        );
+      });
+
+      await act(async () => {
+        requireSwitchForLabel(container, 'Start at Login').click();
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain(
+        'Failed to update Start at Login: native write denied'
+      );
+      expect(requireSwitchForLabel(container, 'Start at Login').checked).toBe(false);
+    } finally {
+      await unmount(root, container);
+    }
   });
 
   it('renders Workbench Theme and the closed five-font catalog on Appearance', () => {
@@ -799,6 +889,7 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
           actions={actions()}
           product={{ status: 'ready', value: productState() }}
           settings={{
+            runtime: { startAtLogin: false },
             workbench: { locale: 'zh-CN', themePreference: 'system' },
             canvas: {
               hierarchyEdgesVisible: true,
@@ -819,6 +910,8 @@ describe('SettingsPanel shared UI composition', { tags: ['settings'] }, () => {
     expect(html).not.toContain('<h2');
     expect(html).toContain('语言');
     expect(html).toContain('简体中文');
+    expect(html).toContain('登录时启动');
+    expect(html).toContain('登录系统时启动 Debrute Runtime，不打开 Workbench。');
     expect(html).not.toContain('应用');
     expect(html).toContain('移除 Debrute');
     expect(saved).toEqual([]);
@@ -983,6 +1076,7 @@ function stateWithSettings(overrides: Partial<SettingsPanelState> = {}): Setting
 
 function globalSettingsFixture(overrides: Partial<DebruteGlobalSettingsView> = {}): DebruteGlobalSettingsView {
   return {
+    runtime: { startAtLogin: false },
     workbench: { locale: 'en', themePreference: 'system' },
     canvas: {
       hierarchyEdgesVisible: true,
@@ -1132,6 +1226,17 @@ function requireInputForLabel(container: HTMLElement, label: string): HTMLInputE
   const input = field?.querySelector('input');
   if (!(input instanceof HTMLInputElement)) {
     throw new Error(`Expected input for ${label}.`);
+  }
+  return input;
+}
+
+function requireSwitchForLabel(container: HTMLElement, label: string): HTMLInputElement {
+  const switchLabel = Array.from(container.querySelectorAll<HTMLElement>('.db-switch')).find((candidate) => (
+    candidate.querySelector('.db-switch__label')?.textContent === label
+  ));
+  const input = switchLabel?.querySelector('input');
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error(`Expected switch for ${label}.`);
   }
   return input;
 }

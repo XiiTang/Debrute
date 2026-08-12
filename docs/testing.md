@@ -393,6 +393,12 @@ login item, and Windows registration, shortcut, and installer cache to be absent
 while an unrelated Skill remains. macOS also requires its detached Runtime
 capsule to disappear; Windows verifies the reboot-deletion scheduling primitive
 in native tests because the executing capsule may remain until reboot.
+Focused Runtime tests also verify that Start at Login round-trips the exact
+native Runtime entrypoint, confirms native state before publishing, emits one
+ordered complete Global Settings event per effective change, and never writes
+the live boolean into `global_settings.json`. Settings DOM tests verify the
+English and Chinese copy, accepted-only switch behavior, pending disablement,
+and exact inline native failure.
 
 Desktop lifecycle tests also issue Command-Q before Control acquisition
 finishes. They prove that Desktop opens no window, completes only the existing

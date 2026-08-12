@@ -92,6 +92,7 @@ describe('WorkbenchGlobalProjection', () => {
 
 function settingsFixture(locale: 'en' | 'zh-CN' = 'en'): DebruteGlobalSettingsView {
   return {
+    runtime: { startAtLogin: false },
     workbench: { locale, themePreference: 'dark' },
     canvas: {
       hierarchyEdgesVisible: true,

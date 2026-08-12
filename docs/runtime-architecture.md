@@ -95,13 +95,16 @@ frontend. No Project path crosses Control; the CLI may append one absolute
 requested root with the shared pure route builder. URL resolution does not open
 a Workbench connection, admit a Project, or change Recent Projects.
 
-The Start at Login check item reflects the exact operating-system login
-registration last confirmed by Runtime. A user change performs one registration
-write using the selected check state. A successful write confirms that state;
-a failed write restores the previously confirmed check state and places the
-exact operating-system error in that menu item's label. Runtime does not leave
-an optimistic state, silently downgrade the failure to a log message, or retry
-through a different registration path.
+Start at Login reflects the exact operating-system login registration last
+confirmed by Runtime. Its Runtime-owned setting service is shared by the tray
+check item and Workbench General Settings. Either entry performs one native
+registration write using the selected state, confirms the resulting native
+state, and publishes the complete ordered Global Settings projection to every
+Workbench. The tray follows the same confirmed revision. A failed write keeps
+the previously confirmed state; General shows the exact error inline and the
+tray places it in that menu item's label. Runtime does not persist another
+boolean, leave an optimistic state, monitor external system-setting changes,
+silently downgrade failure to a log message, or retry through another path.
 
 The login registration always names the explicit stable Runtime entrypoint
 provided by the Product or source-development launcher. That non-empty absolute
@@ -384,6 +387,11 @@ ligatures. `canvas.hierarchyEdgesVisible` is one boolean that defaults to
 `true`. Recent Projects persist only an ordered list of canonical roots.
 Non-secret settings and secrets use separate atomic files;
 public projections expose only whether a key is set and a non-secret preview.
+The complete Global Settings view additionally includes the live
+`runtime.startAtLogin` projection from the operating-system login registration.
+That field participates in the same typed mutation and ordered event path but
+is not serialized into the global settings file; the native registration is
+its sole source of truth and absence means disabled.
 Runtime stores no default frontend. Every frontend-opening command or menu item
 selects `desktop` or `browser` explicitly. Global events carry an ordered
 `globalRevision` independent of Project state.

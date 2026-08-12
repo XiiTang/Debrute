@@ -103,3 +103,8 @@
 .db-switch__input:focus-visible + .db-switch__track {
   box-shadow: var(--db-focus-ring);
 }
+
+.db-switch__input:disabled + .db-switch__track,
+.db-switch__input:disabled ~ .db-switch__label {
+  opacity: 0.55;
+}

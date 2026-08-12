@@ -4,6 +4,7 @@ use std::{
     error::Error,
     fmt, io,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
 };
 
 #[cfg(target_os = "macos")]
@@ -27,6 +28,31 @@ pub fn require_stable_runtime_entrypoint(path: PathBuf) -> Result<PathBuf, Login
     } else {
         Err(LoginItemError::InvalidStableEntrypoint)
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StartAtLoginSnapshot {
+    pub revision: u64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartAtLoginMutationResult {
+    pub snapshot: StartAtLoginSnapshot,
+    pub changed: bool,
+}
+
+pub trait StartAtLoginSetting: Send + Sync {
+    fn snapshot(&self) -> StartAtLoginSnapshot;
+
+    /// Applies the requested native login registration and confirms its exact state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoginItemError`] when the native state cannot be read or changed.
+    fn set_enabled(&self, enabled: bool) -> Result<StartAtLoginMutationResult, LoginItemError>;
+
+    fn install_observer(&self, observer: Arc<dyn Fn(StartAtLoginSnapshot) + Send + Sync>) -> bool;
 }
 
 #[cfg(target_os = "macos")]
@@ -206,6 +232,205 @@ impl WindowsLoginItem {
     }
 }
 
+trait LoginItemRegistration: Send + Sync {
+    fn is_enabled(&self) -> Result<bool, LoginItemError>;
+    fn set_enabled(&self, enabled: bool) -> Result<(), LoginItemError>;
+}
+
+#[cfg(target_os = "macos")]
+impl LoginItemRegistration for MacOsLoginItem {
+    fn is_enabled(&self) -> Result<bool, LoginItemError> {
+        MacOsLoginItem::is_enabled(self)
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<(), LoginItemError> {
+        MacOsLoginItem::set_enabled(self, enabled)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl LoginItemRegistration for WindowsLoginItem {
+    fn is_enabled(&self) -> Result<bool, LoginItemError> {
+        WindowsLoginItem::is_enabled(self)
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<(), LoginItemError> {
+        WindowsLoginItem::set_enabled(self, enabled)
+    }
+}
+
+struct StartAtLoginState {
+    revision: u64,
+    enabled: bool,
+    observer: Option<Arc<dyn Fn(StartAtLoginSnapshot) + Send + Sync>>,
+}
+
+struct StartAtLoginService<R> {
+    registration: R,
+    state: Mutex<StartAtLoginState>,
+}
+
+impl<R: LoginItemRegistration> StartAtLoginService<R> {
+    fn new(registration: R) -> Result<Self, LoginItemError> {
+        let enabled = registration.is_enabled()?;
+        Ok(Self {
+            registration,
+            state: Mutex::new(StartAtLoginState {
+                revision: 0,
+                enabled,
+                observer: None,
+            }),
+        })
+    }
+
+    fn snapshot(&self) -> StartAtLoginSnapshot {
+        let state = self.lock_state();
+        StartAtLoginSnapshot {
+            revision: state.revision,
+            enabled: state.enabled,
+        }
+    }
+
+    fn set_enabled(&self, requested: bool) -> Result<StartAtLoginMutationResult, LoginItemError> {
+        let mut state = self.lock_state();
+        let actual = self.registration.is_enabled()?;
+        if actual != requested {
+            self.registration.set_enabled(requested)?;
+            let confirmed = self.registration.is_enabled()?;
+            if confirmed != requested {
+                return Err(LoginItemError::StateConfirmationFailed);
+            }
+        }
+        let changed = state.enabled != requested;
+        if changed {
+            state.revision = state
+                .revision
+                .checked_add(1)
+                .expect("Start at Login revision exhausted");
+            state.enabled = requested;
+        }
+        let snapshot = StartAtLoginSnapshot {
+            revision: state.revision,
+            enabled: state.enabled,
+        };
+        let observer = changed.then(|| state.observer.clone()).flatten();
+        drop(state);
+        if let Some(observer) = observer {
+            observer(snapshot);
+        }
+        Ok(StartAtLoginMutationResult { snapshot, changed })
+    }
+
+    fn install_observer(&self, observer: Arc<dyn Fn(StartAtLoginSnapshot) + Send + Sync>) -> bool {
+        let mut state = self.lock_state();
+        if state.observer.is_some() {
+            return false;
+        }
+        state.observer = Some(observer);
+        true
+    }
+
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, StartAtLoginState> {
+        self.state
+            .lock()
+            .expect("Start at Login state lock poisoned")
+    }
+}
+
+#[cfg(target_os = "macos")]
+type PlatformLoginItem = MacOsLoginItem;
+#[cfg(target_os = "windows")]
+type PlatformLoginItem = WindowsLoginItem;
+
+pub struct PlatformStartAtLoginSetting {
+    service: StartAtLoginService<PlatformLoginItem>,
+}
+
+impl PlatformStartAtLoginSetting {
+    /// Opens the current user's exact native Runtime login registration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoginItemError`] when the current-user registration cannot be read.
+    pub fn new(stable_runtime: impl AsRef<Path>) -> Result<Self, LoginItemError> {
+        #[cfg(target_os = "macos")]
+        let registration = {
+            let home = std::env::var_os("HOME").ok_or(LoginItemError::HomeUnavailable)?;
+            MacOsLoginItem::new(home, stable_runtime)
+        };
+        #[cfg(target_os = "windows")]
+        let registration = WindowsLoginItem::new(stable_runtime);
+        Ok(Self {
+            service: StartAtLoginService::new(registration)?,
+        })
+    }
+}
+
+impl StartAtLoginSetting for PlatformStartAtLoginSetting {
+    fn snapshot(&self) -> StartAtLoginSnapshot {
+        self.service.snapshot()
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<StartAtLoginMutationResult, LoginItemError> {
+        self.service.set_enabled(enabled)
+    }
+
+    fn install_observer(&self, observer: Arc<dyn Fn(StartAtLoginSnapshot) + Send + Sync>) -> bool {
+        self.service.install_observer(observer)
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+struct MemoryLoginItem {
+    enabled: Mutex<bool>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl LoginItemRegistration for MemoryLoginItem {
+    fn is_enabled(&self) -> Result<bool, LoginItemError> {
+        Ok(*self.enabled.lock().expect("memory login item should lock"))
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<(), LoginItemError> {
+        *self.enabled.lock().expect("memory login item should lock") = enabled;
+        Ok(())
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub struct MemoryStartAtLoginSetting {
+    service: StartAtLoginService<MemoryLoginItem>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl MemoryStartAtLoginSetting {
+    #[must_use]
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            service: StartAtLoginService::new(MemoryLoginItem {
+                enabled: Mutex::new(enabled),
+            })
+            .expect("memory login item construction should succeed"),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl StartAtLoginSetting for MemoryStartAtLoginSetting {
+    fn snapshot(&self) -> StartAtLoginSnapshot {
+        self.service.snapshot()
+    }
+
+    fn set_enabled(&self, enabled: bool) -> Result<StartAtLoginMutationResult, LoginItemError> {
+        self.service.set_enabled(enabled)
+    }
+
+    fn install_observer(&self, observer: Arc<dyn Fn(StartAtLoginSnapshot) + Send + Sync>) -> bool {
+        self.service.install_observer(observer)
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn xml_escape(value: &str) -> String {
     value
@@ -227,9 +452,11 @@ pub enum LoginItemError {
     Io(io::Error),
     #[cfg(target_os = "macos")]
     MissingParent,
+    HomeUnavailable,
     NonUtf8Path,
     InvalidWindowsCommandPath,
     InvalidStableEntrypoint,
+    StateConfirmationFailed,
 }
 
 impl fmt::Display for LoginItemError {
@@ -238,12 +465,16 @@ impl fmt::Display for LoginItemError {
             Self::Io(error) => error.fmt(formatter),
             #[cfg(target_os = "macos")]
             Self::MissingParent => formatter.write_str("Login item path has no parent."),
+            Self::HomeUnavailable => formatter.write_str("User home is unavailable."),
             Self::NonUtf8Path => formatter.write_str("Login Runtime path is not valid Unicode."),
             Self::InvalidWindowsCommandPath => {
                 formatter.write_str("Login Runtime path is not safe for a Windows startup command.")
             }
             Self::InvalidStableEntrypoint => {
                 formatter.write_str("Stable Runtime entrypoint must be an absolute path.")
+            }
+            Self::StateConfirmationFailed => {
+                formatter.write_str("Start at Login did not reach the requested native state.")
             }
         }
     }
@@ -255,9 +486,86 @@ impl Error for LoginItemError {
             Self::Io(error) => Some(error),
             #[cfg(target_os = "macos")]
             Self::MissingParent => None,
-            Self::NonUtf8Path | Self::InvalidWindowsCommandPath | Self::InvalidStableEntrypoint => {
-                None
+            Self::HomeUnavailable
+            | Self::NonUtf8Path
+            | Self::InvalidWindowsCommandPath
+            | Self::InvalidStableEntrypoint
+            | Self::StateConfirmationFailed => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FallibleMemoryLoginItem {
+        state: Mutex<Result<bool, &'static str>>,
+    }
+
+    impl FallibleMemoryLoginItem {
+        fn enabled(enabled: bool) -> Self {
+            Self {
+                state: Mutex::new(Ok(enabled)),
             }
         }
+    }
+
+    impl LoginItemRegistration for FallibleMemoryLoginItem {
+        fn is_enabled(&self) -> Result<bool, LoginItemError> {
+            self.state
+                .lock()
+                .expect("memory login item should lock")
+                .map_err(|message| LoginItemError::Io(io::Error::other(message)))
+        }
+
+        fn set_enabled(&self, enabled: bool) -> Result<(), LoginItemError> {
+            let mut state = self.state.lock().expect("memory login item should lock");
+            if state.is_err() {
+                return Err(LoginItemError::Io(io::Error::other("denied")));
+            }
+            *state = Ok(enabled);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn start_at_login_confirms_changes_and_notifies_one_observer() {
+        let service = StartAtLoginService::new(FallibleMemoryLoginItem::enabled(false)).unwrap();
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let observer_values = Arc::clone(&observed);
+        assert!(service.install_observer(Arc::new(move |snapshot| {
+            observer_values
+                .lock()
+                .expect("observer values should lock")
+                .push(snapshot);
+        })));
+        assert!(!service.install_observer(Arc::new(|_| {})));
+
+        let changed = service.set_enabled(true).unwrap();
+        assert!(changed.changed);
+        assert_eq!(changed.snapshot.revision, 1);
+        assert!(changed.snapshot.enabled);
+        assert_eq!(observed.lock().unwrap().as_slice(), &[changed.snapshot]);
+
+        let repeated = service.set_enabled(true).unwrap();
+        assert!(!repeated.changed);
+        assert_eq!(observed.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn failed_native_write_preserves_the_last_confirmed_state() {
+        let item = FallibleMemoryLoginItem::enabled(true);
+        let service = StartAtLoginService::new(item).unwrap();
+        *service.registration.state.lock().unwrap() = Err("denied");
+
+        assert!(service.set_enabled(false).is_err());
+        assert_eq!(
+            service.snapshot(),
+            StartAtLoginSnapshot {
+                revision: 0,
+                enabled: true,
+            }
+        );
     }
 }

@@ -10,6 +10,7 @@ use debrute_runtime::global::{
     GlobalConfigStore, GlobalRuntimeChange, GlobalRuntimeService, GlobalSettingsError,
     GlobalSettingsMutation,
 };
+use debrute_runtime::login::MemoryStartAtLoginSetting;
 use debrute_runtime::models::ModelCatalog;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -550,7 +551,7 @@ fn persisted_global_files_are_closed_and_are_never_repaired_on_read() {
 #[test]
 fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
     let home = temporary_home("runtime-events");
-    let service = GlobalRuntimeService::new(GlobalConfigStore::new(&home), ModelCatalog::bundled());
+    let service = global_runtime_service(&home);
     let alpha = project_root(&home, "alpha");
     let events = Arc::new(Mutex::new(Vec::new()));
     let observer_events = Arc::clone(&events);
@@ -595,9 +596,52 @@ fn global_runtime_publishes_one_monotonic_event_per_effective_change() {
 }
 
 #[test]
+fn start_at_login_uses_native_state_and_the_ordered_global_settings_projection() {
+    let home = temporary_home("start-at-login");
+    let native = Arc::new(MemoryStartAtLoginSetting::new(false));
+    let service = GlobalRuntimeService::new(
+        GlobalConfigStore::new(&home),
+        ModelCatalog::bundled(),
+        native,
+    );
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let observer_events = Arc::clone(&events);
+    assert!(service.install_observer(Arc::new(move |event| {
+        observer_events.lock().unwrap().push(event);
+    })));
+
+    assert!(!service.settings_get().unwrap().runtime.start_at_login);
+    let enabled = service
+        .settings_mutate(&mutation(json!({
+            "operation": "set-start-at-login",
+            "enabled": true
+        })))
+        .expect("native Start at Login should enable");
+    assert!(enabled.runtime.start_at_login);
+    assert!(!home.join("config/global_settings.json").exists());
+
+    let recorded = events.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    let GlobalRuntimeChange::GlobalSettingsChanged(settings) = &recorded[0].change else {
+        panic!("Start at Login should publish the complete Global Settings projection");
+    };
+    assert!(settings.runtime.start_at_login);
+    drop(recorded);
+
+    service
+        .settings_mutate(&mutation(json!({
+            "operation": "set-start-at-login",
+            "enabled": true
+        })))
+        .expect("repeated Start at Login should be idempotent");
+    assert_eq!(events.lock().unwrap().len(), 1);
+    fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+#[test]
 fn model_api_key_reveal_returns_the_exact_secret_without_publishing_global_state() {
     let home = temporary_home("api-key-reveal");
-    let service = GlobalRuntimeService::new(GlobalConfigStore::new(&home), ModelCatalog::bundled());
+    let service = global_runtime_service(&home);
     let events = Arc::new(Mutex::new(Vec::new()));
     let observer_events = Arc::clone(&events);
     assert!(service.install_observer(Arc::new(move |event| {
@@ -643,7 +687,7 @@ fn model_api_key_reveal_returns_the_exact_secret_without_publishing_global_state
 #[test]
 fn global_snapshot_captures_product_projection_at_its_revision_barrier() {
     let home = temporary_home("product-snapshot-barrier");
-    let service = GlobalRuntimeService::new(GlobalConfigStore::new(&home), ModelCatalog::bundled());
+    let service = global_runtime_service(&home);
 
     service.publish_product_changed(json!({ "update": { "type": "checking" } }));
     let (snapshot_revision, _, product) = service
@@ -661,10 +705,7 @@ fn global_snapshot_captures_product_projection_at_its_revision_barrier() {
 #[test]
 fn global_event_dispatch_stays_ordered_while_the_first_observer_call_is_blocked() {
     let home = temporary_home("ordered-dispatch");
-    let service = Arc::new(GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-    ));
+    let service = global_runtime_service(&home);
     let events = Arc::new(Mutex::new(Vec::new()));
     let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
     let observer_events = Arc::clone(&events);
@@ -757,10 +798,7 @@ fn global_event_dispatch_stays_ordered_while_the_first_observer_call_is_blocked(
 #[test]
 fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
     let home = temporary_home("recent-linearization");
-    let service = Arc::new(GlobalRuntimeService::new(
-        GlobalConfigStore::new(&home),
-        ModelCatalog::bundled(),
-    ));
+    let service = global_runtime_service(&home);
     let events = Arc::new(Mutex::new(Vec::new()));
     let observer_events = Arc::clone(&events);
     assert!(service.install_observer(Arc::new(move |event| {
@@ -810,6 +848,14 @@ fn concurrent_recent_project_mutations_end_with_the_committed_snapshot() {
     assert_eq!(event_projects, &disk_projects);
     drop(events);
     fs::remove_dir_all(home).expect("temporary home should be removed");
+}
+
+fn global_runtime_service(home: &Path) -> Arc<GlobalRuntimeService> {
+    GlobalRuntimeService::new(
+        GlobalConfigStore::new(home),
+        ModelCatalog::bundled(),
+        Arc::new(MemoryStartAtLoginSetting::new(false)),
+    )
 }
 
 fn temporary_home(label: &str) -> PathBuf {

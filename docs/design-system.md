@@ -408,6 +408,9 @@ professional-tool Integration with an
 aggregate status and controlled switch; it does not present a platform master,
 connection list, or manual Connect action. Photoshop transfer activity disables
 only its row switch and uses one inline `Transfer in progress.` message.
+General places the controlled Start at Login switch and its one-line description
+directly after Language without a Startup heading or card. While its native
+write is pending, only that switch is disabled; an exact failure appears inline.
 
 Explorer owns tree geometry and editing. Inspector owns selection properties,
 metadata, and diagnostics. Terminal owns terminal tabs, sessions, status, and

@@ -29,6 +29,7 @@ describe('Workbench bootstrap theme', () => {
 
 function settingsFixture(themePreference: 'light' | 'dark'): DebruteGlobalSettingsView {
   return {
+    runtime: { startAtLogin: false },
     workbench: { locale: 'en', themePreference },
     canvas: {
       hierarchyEdgesVisible: true,

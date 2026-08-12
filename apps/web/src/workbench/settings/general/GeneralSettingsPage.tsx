@@ -10,7 +10,7 @@ import type {
 } from '@debrute/app-protocol';
 import type { EventProjection } from '../../../types';
 import { useI18n, type WorkbenchI18n } from '../../i18n/index';
-import { Button, Field, Modal, Select, StatusPill, Toolbar, type StatusTone } from '../../ui/index';
+import { Button, Field, Modal, Select, StatusPill, Switch, Toolbar, type StatusTone } from '../../ui/index';
 import type { WorkbenchSettingsActions } from '../useWorkbenchSettingsController';
 
 type OperationState =
@@ -42,6 +42,7 @@ export function GeneralSettingsPage({
   const [operation, setOperation] = useState<OperationState>({ status: 'idle' });
   const [localeDraft, setLocaleDraft] = useState(settings.workbench.locale);
   const [localeOperation, setLocaleOperation] = useState<OperationState>({ status: 'idle' });
+  const [startAtLoginOperation, setStartAtLoginOperation] = useState<OperationState>({ status: 'idle' });
   const [removalOpen, setRemovalOpen] = useState(false);
   const [keepConfig, setKeepConfig] = useState(false);
   const [removalOperation, setRemovalOperation] = useState<OperationState>({ status: 'idle' });
@@ -70,6 +71,16 @@ export function GeneralSettingsPage({
     }
   };
 
+  const saveStartAtLogin = async (enabled: boolean) => {
+    setStartAtLoginOperation({ status: 'loading' });
+    try {
+      await onSettingsChange({ operation: 'set-start-at-login', enabled });
+      setStartAtLoginOperation({ status: 'idle' });
+    } catch (error) {
+      setStartAtLoginOperation({ status: 'error', message: errorMessage(error) });
+    }
+  };
+
   return (
     <div className="general-settings-page">
       {section === 'general' ? <section className="settings-group">
@@ -95,6 +106,32 @@ export function GeneralSettingsPage({
           </small>
         ) : null}
       </section> : null}
+      {section === 'general' ? (
+        <section
+          className="settings-group settings-start-at-login"
+          aria-label={i18n.t('settings.general.startAtLogin.label')}
+        >
+          <Switch
+            label={i18n.t('settings.general.startAtLogin.label')}
+            checked={settings.runtime.startAtLogin}
+            disabled={startAtLoginOperation.status === 'loading'}
+            onChange={(event) => {
+              const requested = event.currentTarget.checked;
+              // Native registration is accepted-only; retain the last Runtime-confirmed state.
+              event.currentTarget.checked = settings.runtime.startAtLogin;
+              void saveStartAtLogin(requested);
+            }}
+          />
+          <small className="db-form-help">{i18n.t('settings.general.startAtLogin.description')}</small>
+          {startAtLoginOperation.status === 'error' ? (
+            <small className="db-form-error">
+              {i18n.t('settings.general.startAtLogin.saveFailed', {
+                message: startAtLoginOperation.message
+              })}
+            </small>
+          ) : null}
+        </section>
+      ) : null}
       {section === 'about' ? <section className="settings-group">
         <h3>{i18n.t('settings.general.application')}</h3>
         <div className="settings-property-grid">

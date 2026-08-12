@@ -465,7 +465,8 @@ General; Appearance; Feedback; Image, Video, TTS, Music, and SFX Models;
 Plugins; and System. Plugins controls Runtime-hosted professional-tool
 gateways; there is no recommended-project catalog or generic tool manager.
 Appearance composes the Workbench Theme mode with the separate
-global Canvas Text Appearance controls; General retains language, while System
+global Canvas Text Appearance controls; General retains language and the native
+Start at Login entry, while System
 owns product information and updates. Feedback configures the machine-local
 Feedback Mark Catalog and the ordered Action Bar subset. Runtime-owned Global Settings is
 ready before React mounts. Product retains its own loading and ready state;
@@ -479,6 +480,16 @@ progress.` Runtime rejects the same stale disable atomically. HTTP success does
 not commit the switch locally; ordered settings and Photoshop events remain its
 only authority. Pairing, Project links, and a separate refresh request do not
 exist.
+
+General places **Start at Login** directly after Language, with no separate
+section title. Its description states that login starts Runtime while Workbench
+stays closed. Desktop and browser Workbench use the same entry. The controlled
+switch reads `runtime.startAtLogin`, submits `set-start-at-login`, remains at the
+last confirmed value while the native write is pending, and disables only
+itself until completion. Ordered `globalSettings.changed` events are the only
+successful-state confirmation; native failure leaves the confirmed value in
+place and appears inline. Workbench owns no Electron IPC, native registration,
+external-change polling, or second persisted boolean for this setting.
 
 General ends with one destructive Product-removal action. It opens one modal
 whose preservation checkbox is off by default and names the only retained
@@ -503,7 +514,7 @@ line-height ratio, requested weight, letter spacing, and ligature value. The
 Canvas hierarchy-edge control sends the independent
 `canvas.hierarchyEdgesVisible` boolean and has no duplicate Settings page
 control. They use the same always-mounted Workbench Global Settings controller
-as Language, Theme, Feedback, Plugin enablement, and Model persistence. Valid
+as Language, Start at Login, Theme, Feedback, Plugin enablement, and Model persistence. Valid
 changes update the local Canvas immediately; each Workbench window serializes
 its submissions and coalesces unsent fields to their newest values. A successful
 mutation response is not confirmation: the local values remain presented until
