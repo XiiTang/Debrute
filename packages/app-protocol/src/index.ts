@@ -151,6 +151,11 @@ interface CanvasImageDimensions {
   height: number;
 }
 
+interface ProjectImageDimensions {
+  width: number;
+  height: number;
+}
+
 type CanvasResource =
   | { projectRelativePath: string; nodeKind: 'directory' }
   | {
@@ -198,7 +203,7 @@ export type ProjectPathInspection =
       createdAtMs?: number;
       modifiedAtMs?: number;
       media:
-        | { kind: 'image'; dimensions?: CanvasImageDimensions }
+        | { kind: 'image'; dimensions?: ProjectImageDimensions }
         | { kind: 'video'; sourceToken: string }
         | { kind: 'audio'; sourceToken: string }
         | { kind: 'other' };

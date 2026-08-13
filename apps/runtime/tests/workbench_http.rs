@@ -2,14 +2,14 @@
 
 use std::{
     fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Cursor, Write as _},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 #[cfg(target_os = "macos")]
-use std::{io::Write as _, os::unix::net::UnixStream};
+use std::os::unix::net::UnixStream;
 
 #[cfg(target_os = "macos")]
 use debrute_runtime::control::{
@@ -1160,6 +1160,115 @@ fn inspector_reads_project_path_metadata_and_resolves_an_exact_file_source() {
 }
 
 #[test]
+fn inspector_reads_image_dimensions_and_quietly_omits_unreadable_dimensions() {
+    let runtime = TestRuntime::start();
+    let project = runtime.create_project("inspector-project-image-metadata");
+    image::RgbaImage::new(8, 4)
+        .save(Path::new(&project.root).join("valid.png"))
+        .expect("image fixture should be written");
+    image::RgbaImage::new(11, 7)
+        .save_with_format(
+            Path::new(&project.root).join("valid.avif"),
+            image::ImageFormat::Avif,
+        )
+        .expect("AVIF fixture should be written");
+    let mut encoded_jpeg = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image::RgbImage::new(12, 5))
+        .write_to(&mut encoded_jpeg, image::ImageFormat::Jpeg)
+        .expect("JPEG fixture should encode");
+    for orientation in [6, 8] {
+        fs::write(
+            Path::new(&project.root).join(format!("oriented-{orientation}.jpg")),
+            jpeg_with_exif_orientation(encoded_jpeg.get_ref(), orientation),
+        )
+        .expect("oriented JPEG fixture should be written");
+    }
+    let valid_svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="13" height="9"/>"#;
+    fs::write(Path::new(&project.root).join("valid.svg"), valid_svg)
+        .expect("SVG fixture should be written");
+    fs::write(
+        Path::new(&project.root).join("valid.svgz"),
+        gzip_fixture(valid_svg),
+    )
+    .expect("SVGZ fixture should be written");
+    let excessive_svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="13" height="9">{}</svg>"#,
+        "<g/>".repeat(100_001)
+    );
+    fs::write(
+        Path::new(&project.root).join("excessive-elements.svg"),
+        excessive_svg.as_bytes(),
+    )
+    .expect("excessive SVG fixture should be written");
+    fs::write(
+        Path::new(&project.root).join("excessive-elements.svgz"),
+        gzip_fixture(excessive_svg.as_bytes()),
+    )
+    .expect("excessive SVGZ fixture should be written");
+    fs::write(Path::new(&project.root).join("broken.png"), b"not-an-image")
+        .expect("broken image fixture should be written");
+    let client = test_client();
+    let (cookie, credential, _events) = open_unbound_connection(&client, &runtime);
+    open_project(&client, &runtime, &project, &cookie, &credential);
+
+    let inspect = |project_relative_path: &str| {
+        let response = client
+            .post(format!(
+                "{}/api/workbench/bindings/{}/files/inspect",
+                runtime.origin(),
+                project.binding_id()
+            ))
+            .header(ORIGIN, runtime.origin())
+            .header(COOKIE, &cookie)
+            .header(WORKBENCH_CONNECTION_HEADER, &credential)
+            .json(&json!({ "projectRelativePath": project_relative_path }))
+            .send()
+            .expect("Project image inspection should complete");
+        let status = response.status().as_u16();
+        let body: Value = response
+            .json()
+            .expect("Project image inspection should return JSON");
+        assert_eq!(status, 200, "{body}");
+        body
+    };
+
+    let valid = inspect("valid.png");
+    assert_eq!(valid["media"]["kind"], "image");
+    assert_eq!(valid["media"]["dimensions"]["width"], 8);
+    assert_eq!(valid["media"]["dimensions"]["height"], 4);
+
+    let avif = inspect("valid.avif");
+    assert_eq!(avif["media"]["kind"], "image");
+    assert_eq!(avif["media"]["dimensions"]["width"], 11);
+    assert_eq!(avif["media"]["dimensions"]["height"], 7);
+
+    for orientation in [6, 8] {
+        let oriented = inspect(&format!("oriented-{orientation}.jpg"));
+        assert_eq!(oriented["media"]["kind"], "image");
+        assert_eq!(oriented["media"]["dimensions"]["width"], 5);
+        assert_eq!(oriented["media"]["dimensions"]["height"], 12);
+    }
+
+    for path in ["valid.svg", "valid.svgz"] {
+        let svg = inspect(path);
+        assert_eq!(svg["media"]["kind"], "image");
+        assert_eq!(svg["media"]["dimensions"]["width"], 13);
+        assert_eq!(svg["media"]["dimensions"]["height"], 9);
+    }
+
+    for path in ["excessive-elements.svg", "excessive-elements.svgz"] {
+        let svg = inspect(path);
+        assert_eq!(svg["media"]["kind"], "image");
+        assert!(svg["media"].get("dimensions").is_none());
+    }
+
+    let broken = inspect("broken.png");
+    assert_eq!(broken["media"]["kind"], "image");
+    assert!(broken["media"].get("dimensions").is_none());
+    assert_eq!(broken["sizeBytes"], 12);
+}
+
+#[test]
 fn passive_media_routes_reject_missing_or_empty_identity_values() {
     let runtime = TestRuntime::start();
     let project = runtime.create_project("media-query-contract");
@@ -2201,4 +2310,58 @@ impl TestProject {
 fn media_revision(path: &Path) -> String {
     let bytes = fs::read(path).expect("media fixture should read");
     format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn jpeg_with_exif_orientation(jpeg: &[u8], orientation: u8) -> Vec<u8> {
+    assert!(jpeg.starts_with(&[0xff, 0xd8]));
+    let mut output = Vec::with_capacity(jpeg.len() + 36);
+    output.extend_from_slice(&jpeg[..2]);
+    output.extend_from_slice(&[
+        0xff,
+        0xe1,
+        0x00,
+        0x22,
+        b'E',
+        b'x',
+        b'i',
+        b'f',
+        0,
+        0,
+        b'I',
+        b'I',
+        0x2a,
+        0,
+        8,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0x12,
+        0x01,
+        3,
+        0,
+        1,
+        0,
+        0,
+        0,
+        orientation,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ]);
+    output.extend_from_slice(&jpeg[2..]);
+    output
+}
+
+fn gzip_fixture(bytes: &[u8]) -> Vec<u8> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(bytes)
+        .expect("gzip fixture bytes should write");
+    encoder.finish().expect("gzip fixture should finish")
 }

@@ -671,7 +671,7 @@ mod tests {
             let home = TemporaryDirectory::new("home");
             let project = TemporaryDirectory::new("project");
             fs::write(project.as_ref().join("source.png"), b"project source").unwrap();
-            let previews = Arc::new(ProjectPreviewService::new());
+            let previews = Arc::new(ProjectPreviewService::new_for_test());
             let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews).unwrap());
             let projects = ProjectSessionRegistry::new(
                 home.as_ref(),

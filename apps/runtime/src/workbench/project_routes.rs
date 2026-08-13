@@ -547,7 +547,20 @@ pub(super) async fn trash_paths(
         Ok(session) => session,
         Err(response) => return response,
     };
-    match session.trash_paths(runtime.native_shell(), &input.entries) {
+    let result = match tokio::task::spawn_blocking(move || {
+        session.trash_paths(runtime.native_shell(), &input.entries)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            return project_error(ProjectError::service(
+                "project_trash_worker_failed",
+                format!("Project Trash transaction worker failed: {error}"),
+            ));
+        }
+    };
+    match result {
         Ok(result) => command_response(&scope.binding_id, result),
         Err(error) => project_error(error),
     }

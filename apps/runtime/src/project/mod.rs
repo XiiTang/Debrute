@@ -5,6 +5,7 @@ mod canvas_store;
 mod error;
 mod feedback;
 mod files;
+mod inspection;
 mod media;
 mod native_shell;
 #[cfg(feature = "native-watcher-probe")]
@@ -23,6 +24,7 @@ pub(crate) use canvas_store::*;
 pub use error::*;
 pub use feedback::*;
 pub use files::*;
+pub(crate) use inspection::*;
 pub use media::*;
 pub use native_shell::*;
 #[cfg(feature = "native-watcher-probe")]

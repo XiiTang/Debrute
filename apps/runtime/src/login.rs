@@ -15,6 +15,8 @@ use uuid::Uuid;
 #[cfg(target_os = "macos")]
 const MACOS_LAUNCH_AGENT_NAME: &str = "com.debrute.runtime.plist";
 #[cfg(target_os = "windows")]
+const WINDOWS_RUN_SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+#[cfg(target_os = "windows")]
 const WINDOWS_RUN_VALUE_NAME: &str = "Debrute Runtime";
 
 /// Validates the stable Runtime path supplied by a launcher.
@@ -171,6 +173,8 @@ pub fn windows_run_value(stable_runtime: &Path) -> Result<String, LoginItemError
 #[cfg(target_os = "windows")]
 pub struct WindowsLoginItem {
     stable_runtime: PathBuf,
+    registry_subkey: String,
+    value_name: String,
 }
 
 #[cfg(target_os = "windows")]
@@ -179,6 +183,23 @@ impl WindowsLoginItem {
     pub fn new(stable_runtime: impl AsRef<Path>) -> Self {
         Self {
             stable_runtime: stable_runtime.as_ref().to_owned(),
+            registry_subkey: WINDOWS_RUN_SUBKEY.to_owned(),
+            value_name: WINDOWS_RUN_VALUE_NAME.to_owned(),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new_for_test(
+        stable_runtime: impl AsRef<Path>,
+        registry_subkey: impl Into<String>,
+        value_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            stable_runtime: stable_runtime.as_ref().to_owned(),
+            registry_subkey: registry_subkey.into(),
+            value_name: value_name.into(),
         }
     }
 
@@ -191,13 +212,12 @@ impl WindowsLoginItem {
         use winreg::{RegKey, enums::HKEY_CURRENT_USER};
 
         let current_user = RegKey::predef(HKEY_CURRENT_USER);
-        let run =
-            match current_user.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
-                Ok(run) => run,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-                Err(error) => return Err(LoginItemError::Io(error)),
-            };
-        match run.get_value::<String, _>(WINDOWS_RUN_VALUE_NAME) {
+        let run = match current_user.open_subkey(&self.registry_subkey) {
+            Ok(run) => run,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(LoginItemError::Io(error)),
+        };
+        match run.get_value::<String, _>(&self.value_name) {
             Ok(value) => Ok(value == windows_run_value(&self.stable_runtime)?),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(LoginItemError::Io(error)),
@@ -210,20 +230,26 @@ impl WindowsLoginItem {
     ///
     /// Returns [`LoginItemError`] for registry or path failures.
     pub fn set_enabled(&self, enabled: bool) -> Result<(), LoginItemError> {
-        use winreg::{RegKey, enums::HKEY_CURRENT_USER};
+        use winreg::{
+            RegKey,
+            enums::{HKEY_CURRENT_USER, KEY_SET_VALUE},
+        };
 
         let current_user = RegKey::predef(HKEY_CURRENT_USER);
-        let (run, _) = current_user
-            .create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
-            .map_err(LoginItemError::Io)?;
         if enabled {
-            run.set_value(
-                WINDOWS_RUN_VALUE_NAME,
-                &windows_run_value(&self.stable_runtime)?,
-            )
-            .map_err(LoginItemError::Io)
+            let (run, _) = current_user
+                .create_subkey(&self.registry_subkey)
+                .map_err(LoginItemError::Io)?;
+            run.set_value(&self.value_name, &windows_run_value(&self.stable_runtime)?)
+                .map_err(LoginItemError::Io)
         } else {
-            match run.delete_value(WINDOWS_RUN_VALUE_NAME) {
+            let run =
+                match current_user.open_subkey_with_flags(&self.registry_subkey, KEY_SET_VALUE) {
+                    Ok(run) => run,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+                    Err(error) => return Err(LoginItemError::Io(error)),
+                };
+            match run.delete_value(&self.value_name) {
                 Ok(()) => Ok(()),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
                 Err(error) => Err(LoginItemError::Io(error)),

@@ -2034,7 +2034,7 @@ fn terminal_test_project_service() -> (PathBuf, ProjectSessionRegistry, String, 
 
     let root = std::env::temp_dir().join(format!("debrute-terminal-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&root).expect("fixture should exist");
-    let previews = Arc::new(ProjectPreviewService::new());
+    let previews = Arc::new(ProjectPreviewService::new_for_test());
     let feedback =
         Arc::new(CanvasFeedbackArtifacts::new(previews).expect("feedback scheduler should start"));
     let registry = ProjectSessionRegistry::new(

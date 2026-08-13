@@ -38,7 +38,6 @@ fn available_canvas_workspace(snapshot: &ProjectSnapshot) -> &CanvasWorkspaceDoc
     }
 }
 
-#[derive(Default)]
 struct VideoTextTrackNodeAdapter;
 
 impl ProjectNodeAdapter for VideoTextTrackNodeAdapter {

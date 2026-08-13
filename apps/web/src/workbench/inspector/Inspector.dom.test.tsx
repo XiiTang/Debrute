@@ -102,6 +102,58 @@ describe('Inspector', () => {
     }
   });
 
+  it('quietly keeps immediate file information when Runtime inspection fails', async () => {
+    const rendered = await render(target({
+      kind: 'single',
+      projectRelativePath: 'media/unavailable.mov'
+    }), actions({
+      inspectProjectPath: vi.fn(async () => {
+        throw new Error('inspection unavailable');
+      })
+    }));
+
+    try {
+      expect(rendered.container.textContent).toContain('unavailable.mov');
+      expect(rendered.container.textContent).toContain('media/unavailable.mov');
+      expect(rendered.container.textContent).toContain('MOV');
+      expect(rendered.container.textContent).not.toContain('Error');
+      expect(rendered.container.textContent).not.toContain('Unavailable');
+    } finally {
+      await rendered.unmount();
+    }
+  });
+
+  it('quietly keeps loaded file fields when browser media metadata cannot load', async () => {
+    const rendered = await render(target({
+      kind: 'single',
+      projectRelativePath: 'media/unavailable.mov'
+    }), actions({
+      inspectProjectPath: vi.fn(async (): Promise<ProjectPathInspection> => ({
+        kind: 'file',
+        projectRelativePath: 'media/unavailable.mov',
+        sizeBytes: 4096,
+        media: { kind: 'video', sourceToken: 'source-token' }
+      })),
+      resolveProjectFileSource: vi.fn(async () => {
+        throw new Error('source unavailable');
+      })
+    }));
+
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(rendered.container.textContent).toContain('4.00 KiB (4,096 bytes)');
+      expect(rendered.container.textContent).not.toContain('Duration');
+      expect(rendered.container.textContent).not.toContain('Dimensions');
+      expect(rendered.container.textContent).not.toContain('Error');
+      expect(rendered.container.textContent).not.toContain('Unavailable');
+    } finally {
+      await rendered.unmount();
+    }
+  });
+
   it('loads AI Generation Record only while its disclosure is open', async () => {
     const lookupModelArtifactProvenance = vi.fn(async () => ({
       sha256: 'sha256-current',
@@ -215,6 +267,29 @@ describe('Inspector', () => {
         await Promise.resolve();
       });
       expect(rendered.container.textContent).not.toContain('Loading');
+    } finally {
+      await rendered.unmount();
+    }
+  });
+
+  it('quietly clears AI loading when provenance lookup fails', async () => {
+    const rendered = await render(target({
+      kind: 'single',
+      projectRelativePath: 'generated/output.png'
+    }), actions({
+      lookupModelArtifactProvenance: vi.fn(async () => {
+        throw new Error('lookup unavailable');
+      })
+    }));
+
+    try {
+      const disclosure = rendered.container.querySelector('details');
+      expect(disclosure).toBeInstanceOf(HTMLDetailsElement);
+      await toggleDisclosure(disclosure!, true);
+      expect(rendered.container.textContent).not.toContain('Loading');
+      expect(rendered.container.textContent).not.toContain('Error');
+      expect(rendered.container.textContent).not.toContain('Unavailable');
+      expect(rendered.container.textContent).not.toContain('No matching generation record');
     } finally {
       await rendered.unmount();
     }

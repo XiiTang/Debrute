@@ -17,11 +17,11 @@ use super::{
     CanvasStatePatchOutcome, CanvasVideoTextTrack, CanvasWorkspaceDocument,
     CanvasWorkspaceSnapshot, CanvasWorkspaceStore, CanvasWorkspaceUnavailable, ProjectCapabilityFs,
     ProjectDiagnostic, ProjectDiagnosticCounts, ProjectDiagnosticSeverity, ProjectDirectoryPath,
-    ProjectError, ProjectFileSourceTarget, ProjectHealthSummary, ProjectImageDimensions,
-    ProjectPathInspection, ProjectPathInspectionMedia, ProjectPathKind, ProjectRelativePath,
-    ProjectResolvedFileSource, ProjectSnapshot, ProjectSourceDigestResolver, ProjectTree,
-    ProjectTreeChange, ProjectTreeEntry, UpdateCanvasFeedbackInput, apply_canvas_state_patch,
-    canvas_media_kind_from_path, canvas_path_is_visible, normalize_feedback_path,
+    ProjectError, ProjectFileSourceTarget, ProjectHealthSummary, ProjectPathInspection,
+    ProjectPathKind, ProjectRelativePath, ProjectResolvedFileSource, ProjectSnapshot,
+    ProjectSourceDigestResolver, ProjectTree, ProjectTreeChange, ProjectTreeEntry,
+    UpdateCanvasFeedbackInput, apply_canvas_state_patch, canvas_media_kind_from_path,
+    canvas_path_is_visible, inspect_project_file_media, normalize_feedback_path,
     open_no_symlink_existing_project_file, project_content_hash, project_content_type,
     project_media_kind_from_content_type, project_text_file_type_for_path, prune_canvas_state_path,
     read_canvas_feedback_state, resolve_no_symlink_existing_project_path,
@@ -1236,31 +1236,8 @@ impl ProjectService {
         }
 
         let relative = ProjectRelativePath::parse(path)?;
-        let (_, metadata, source) = self.open_project_file_source(&relative)?;
-        let media_kind = canvas_media_kind_from_path(path);
-        let media = match media_kind {
-            CanvasMediaKind::Image => ProjectPathInspectionMedia::Image {
-                dimensions: self
-                    .node_adapter
-                    .image_preview_info(&self.root, &relative)
-                    .ok()
-                    .flatten()
-                    .and_then(|preview| preview.dimensions)
-                    .map(|dimensions| ProjectImageDimensions {
-                        width: dimensions.width,
-                        height: dimensions.height,
-                    }),
-            },
-            CanvasMediaKind::Video | CanvasMediaKind::Audio => {
-                let source_token = source.source_token;
-                if media_kind == CanvasMediaKind::Video {
-                    ProjectPathInspectionMedia::Video { source_token }
-                } else {
-                    ProjectPathInspectionMedia::Audio { source_token }
-                }
-            }
-            CanvasMediaKind::Text | CanvasMediaKind::Unknown => ProjectPathInspectionMedia::Other,
-        };
+        let (mut file, metadata, source) = self.open_project_file_source(&relative)?;
+        let media = inspect_project_file_media(path, &source.source_token, &mut file);
         Ok(ProjectPathInspection::File {
             project_relative_path: path.to_owned(),
             size_bytes: metadata.len(),

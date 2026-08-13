@@ -152,7 +152,7 @@ impl ProjectNodeAdapter for NativeProjectNodeAdapter {
 impl ProjectPreviewService {
     #[cfg(test)]
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new_for_test() -> Self {
         Self::new_with_home(
             std::env::temp_dir().join(format!("debrute-preview-home-{}", uuid::Uuid::new_v4())),
         )
@@ -446,13 +446,6 @@ impl ProjectPreviewService {
     #[must_use]
     pub fn video(&self) -> &CanvasVideoPreviewService {
         &self.video
-    }
-}
-
-#[cfg(test)]
-impl Default for ProjectPreviewService {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -757,7 +750,7 @@ mod tests {
 
     #[test]
     fn raster_preview_pool_admits_three_jobs_and_holds_the_fourth() {
-        let service = Arc::new(ProjectPreviewService::new());
+        let service = Arc::new(ProjectPreviewService::new_for_test());
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
         let (entered_sender, entered_receiver) = mpsc::channel();
         let mut workers = Vec::new();
@@ -832,7 +825,7 @@ mod tests {
     fn image_preview_is_revision_bound_and_deterministic() {
         let root = fixture();
         let lease = source_lease(&root, "assets/source.png");
-        let service = ProjectPreviewService::new();
+        let service = ProjectPreviewService::new_for_test();
         let result = service
             .resolve_image_preview_lease(&lease, 4, &PreviewCancellation::default())
             .unwrap();
@@ -861,7 +854,7 @@ mod tests {
         let root = fixture();
         let source_path = root.join("assets/source.png");
         let lease = source_lease(&root, "assets/source.png");
-        let service = ProjectPreviewService::new();
+        let service = ProjectPreviewService::new_for_test();
 
         let mut result = service
             .resolve_image_preview_lease(&lease, 8, &PreviewCancellation::default())
@@ -883,7 +876,7 @@ mod tests {
             .save_with_format(&source_path, image::ImageFormat::Tiff)
             .unwrap();
         let lease = source_lease(&root, "assets/source.tiff");
-        let service = ProjectPreviewService::new();
+        let service = ProjectPreviewService::new_for_test();
 
         let result = service
             .resolve_image_preview_lease(&lease, 8, &PreviewCancellation::default())
@@ -911,7 +904,7 @@ mod tests {
             .save(&source_path)
             .unwrap();
         let lease = source_lease(&root, "assets/panorama.png");
-        let service = ProjectPreviewService::new();
+        let service = ProjectPreviewService::new_for_test();
 
         let result = service
             .resolve_image_preview_lease(&lease, 8_500, &PreviewCancellation::default())
@@ -927,7 +920,7 @@ mod tests {
         let source_path = root.join("assets/large.jpg");
         write_solid_jpeg(&source_path, 5_000, 4_000);
         let lease = source_lease(&root, "assets/large.jpg");
-        let service = ProjectPreviewService::new();
+        let service = ProjectPreviewService::new_for_test();
         assert_eq!(
             service
                 .image_source_info(&root, "assets/large.jpg")
@@ -985,7 +978,7 @@ mod tests {
     #[test]
     fn text_preview_source_and_variant_use_complete_identity() {
         let root = fixture();
-        let service = ProjectPreviewService::new();
+        let service = ProjectPreviewService::new_for_test();
         let target = CanvasTextPreviewSourceTarget {
             project_relative_path: "notes/title.md".to_owned(),
             target_identity: "style:one".to_owned(),
@@ -1013,7 +1006,7 @@ mod tests {
     #[test]
     fn intrinsic_text_preview_width_returns_the_canonical_source() {
         let root = fixture();
-        let service = ProjectPreviewService::new();
+        let service = ProjectPreviewService::new_for_test();
         let target = CanvasTextPreviewSourceTarget {
             project_relative_path: "notes/title.md".to_owned(),
             target_identity: "style:direct".to_owned(),
@@ -1079,7 +1072,7 @@ mod tests {
     fn image_cache_hit_still_validates_the_current_source_snapshot() {
         let root = fixture();
         let source_path = root.join("assets/source.png");
-        let service = ProjectPreviewService::new();
+        let service = ProjectPreviewService::new_for_test();
         let lease = source_lease(&root, "assets/source.png");
         drop(
             service

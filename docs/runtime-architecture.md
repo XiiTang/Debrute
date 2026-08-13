@@ -113,6 +113,12 @@ does not substitute its current version-selected or build-output executable;
 missing or invalid stable-entrypoint input is a startup failure rather than a
 degraded tray or fallback registration.
 
+macOS owns the exact `~/Library/LaunchAgents/com.debrute.runtime.plist` file.
+Windows owns only the `Debrute Runtime` value under the current user's
+`Software\Microsoft\Windows\CurrentVersion\Run` key. Reading a different command
+reports disabled; disabling removes that value and does not create an absent
+Run key. Neither platform searches, imports, or rewrites an older registration.
+
 Product replacement has one target-Runtime launch contract shared by the
 running Runtime's commit path and installed-Desktop recovery. It binds the
 manifest-verified target executable, selected Product version and directories,
@@ -536,19 +542,21 @@ secondary-state persistence also fails, it additionally publishes the Error
 diagnostic `project_path_state_persistence_failed`; ordinary refresh does not
 clear that diagnostic, while the next successful related path mutation does.
 Runtime writes no filesystem or Native Trash recovery journal, Canvas byte
-snapshot, expected output hash, or commit marker. Native Trash validates the
-complete top-level batch before any effect, revalidates each original Project
-path immediately before asking the operating system to trash it, and stops at
-the first failure without retry or rollback. Earlier successful items remain in
-the system Trash and later items are not attempted. Each item is handed to a
-fresh private Runtime worker through an argument-array command containing the
-canonical Project root, one admitted Project-relative path, expected filesystem
-identity, and expected kind. The worker runs before normal Runtime or Terminal
-bootstrap, accepts only that closed command shape, reopens the canonical root,
-repeats no-symbolic-link containment plus identity and kind checks, and calls
-the native Trash Adapter directly. It never builds a shell command. The parent
-supervises the worker with one bounded timeout and treats a non-zero exit,
-signal, or timeout as the item failure.
+snapshot, expected output hash, or commit marker. The HTTP route moves the one
+complete Project-session transaction onto one blocking worker. Inside the
+Project mutation lane, Native Trash validates the complete disjoint top-level
+batch before any effect, including visibility, no-symbolic-link containment,
+existing kind, and Project-root exclusion. It then calls the native adapter once
+per admitted item in request order. One native failure is recorded for that
+item; later items continue without retry or rollback. Only successful items are
+reconciled, and all successes publish at most one revision and one Project
+event.
+
+macOS explicitly uses `NSFileManager`'s Trash operation rather than Finder or
+AppleScript. Windows owns one `IFileOperation` per item with exactly no-UI and
+recycle-on-delete flags, checks item admission, execution, and the final aborted
+state, and rejects any failure. Neither adapter invokes a shell, permanently
+deletes an item, or falls back to another mechanism.
 
 ## Working Copies And Terminal Lifetime
 

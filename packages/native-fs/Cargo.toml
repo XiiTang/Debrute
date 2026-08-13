@@ -14,8 +14,14 @@ trash.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 dunce.workspace = true
-trash.workspace = true
+windows.workspace = true
 windows-sys.workspace = true
+
+[target.'cfg(target_os = "windows")'.dev-dependencies]
+trash.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dev-dependencies]
+uuid.workspace = true
 
 # This crate is the single reviewed native safety capsule for filesystem
 # operations that Rust's standard library does not expose atomically.

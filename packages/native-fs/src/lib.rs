@@ -479,12 +479,13 @@ pub fn external_process_path(path: &Path) -> std::path::PathBuf {
     path.to_path_buf()
 }
 
-/// Moves one absolute file or directory to the operating system trash.
+/// Moves one absolute file or directory to the macOS Trash through
+/// `NSFileManager`.
 ///
 /// # Errors
 /// Returns an invalid-input error for a non-absolute path and otherwise
-/// preserves the native trash failure as an I/O diagnostic.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+/// preserves the native Trash failure as an I/O diagnostic.
+#[cfg(target_os = "macos")]
 pub fn trash_path(path: &Path) -> io::Result<()> {
     if !path.is_absolute() {
         return Err(io::Error::new(
@@ -492,7 +493,116 @@ pub fn trash_path(path: &Path) -> io::Result<()> {
             "trash path must be absolute",
         ));
     }
-    trash::delete(path).map_err(|error| io::Error::other(error.to_string()))
+    use trash::macos::{DeleteMethod, TrashContextExtMacos as _};
+
+    let mut context = trash::TrashContext::new();
+    context.set_delete_method(DeleteMethod::NsFileManager);
+    context
+        .delete(path)
+        .map_err(|error| io::Error::other(error.to_string()))
+}
+
+/// Moves one absolute file or directory to the Windows Recycle Bin through an
+/// owned `IFileOperation` transaction.
+///
+/// # Errors
+/// Returns an invalid-input error for a non-absolute path and otherwise rejects
+/// every failed or aborted Shell operation. It never permanently deletes the
+/// item and has no fallback implementation.
+#[cfg(target_os = "windows")]
+pub fn trash_path(path: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    use windows::{
+        Win32::{
+            System::Com::{CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx},
+            UI::Shell::{
+                FOF_NO_UI, FOFX_RECYCLEONDELETE, FileOperation, IFileOperation, IShellItem,
+                SHCreateItemFromParsingName,
+            },
+        },
+        core::PCWSTR,
+    };
+
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "trash path must be absolute",
+        ));
+    }
+
+    // SAFETY: no reserved pointer is supplied and the successful call is
+    // balanced by `WindowsComApartment` on this same blocking worker thread.
+    // A conflicting apartment mode is rejected rather than using
+    // `IFileOperation` outside the owned STA contract.
+    let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let _apartment = if initialized.is_ok() {
+        WindowsComApartment(true)
+    } else {
+        return Err(windows_shell_error(
+            "initialize COM for Windows Recycle Bin",
+            &windows::core::Error::from_hresult(initialized),
+        ));
+    };
+
+    let shell_path = external_process_path(path);
+    let mut encoded = shell_path.as_os_str().encode_wide().collect::<Vec<_>>();
+    if encoded.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "trash path contains NUL",
+        ));
+    }
+    encoded.push(0);
+
+    // SAFETY: COM is initialized for this thread; `encoded` remains a live,
+    // NUL-terminated UTF-16 path for item creation; every returned COM object
+    // is owned by its Rust wrapper. Each HRESULT is checked before proceeding.
+    unsafe {
+        let operation: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)
+            .map_err(|error| windows_shell_error("create Windows Recycle Bin operation", &error))?;
+        operation
+            .SetOperationFlags(FOF_NO_UI | FOFX_RECYCLEONDELETE)
+            .map_err(|error| windows_shell_error("set recycle-only operation flags", &error))?;
+        let item: IShellItem = SHCreateItemFromParsingName(PCWSTR(encoded.as_ptr()), None)
+            .map_err(|error| {
+                windows_shell_error("open Windows Shell item for recycling", &error)
+            })?;
+        operation
+            .DeleteItem(&item, None)
+            .map_err(|error| windows_shell_error("queue Windows Recycle Bin item", &error))?;
+        operation.PerformOperations().map_err(|error| {
+            windows_shell_error("perform Windows Recycle Bin operation", &error)
+        })?;
+        let aborted = operation.GetAnyOperationsAborted().map_err(|error| {
+            windows_shell_error("confirm Windows Recycle Bin operation", &error)
+        })?;
+        if aborted.as_bool() {
+            return Err(io::Error::other(
+                "Windows Recycle Bin operation was aborted",
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+struct WindowsComApartment(bool);
+
+#[cfg(target_os = "windows")]
+impl Drop for WindowsComApartment {
+    fn drop(&mut self) {
+        if self.0 {
+            // SAFETY: this guard is created only after a successful
+            // CoInitializeEx call on the same thread.
+            unsafe { windows::Win32::System::Com::CoUninitialize() };
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_shell_error(operation: &str, error: &windows::core::Error) -> io::Error {
+    io::Error::other(format!("{operation} failed: {error}"))
 }
 
 /// Atomically renames `source` to `destination` only when the destination is absent.

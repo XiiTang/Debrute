@@ -29,6 +29,7 @@ futures-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 image.workspace = true
+imagesize.workspace = true
 notify.workspace = true
 portable-pty.workspace = true
 regex.workspace = true

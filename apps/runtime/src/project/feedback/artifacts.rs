@@ -1604,7 +1604,7 @@ mod tests {
         ))
         .save(root.join("images/cover.png"))
         .expect("fixture image should save");
-        let previews = Arc::new(ProjectPreviewService::new());
+        let previews = Arc::new(ProjectPreviewService::new_for_test());
         let (sender, receiver) = mpsc::sync_channel(8);
         let scheduler = CanvasFeedbackArtifactScheduler::new(
             CanvasFeedbackArtifactRenderer::new(previews),

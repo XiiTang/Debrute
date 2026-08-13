@@ -1663,7 +1663,7 @@ mod tests {
     }
 
     fn registry(home: &Path) -> ProjectSessionRegistry {
-        let previews = Arc::new(ProjectPreviewService::new());
+        let previews = Arc::new(ProjectPreviewService::new_for_test());
         let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews).unwrap());
         ProjectSessionRegistry::new(home, Arc::new(DefaultProjectNodeAdapter), feedback)
     }
@@ -2587,7 +2587,7 @@ mod tests {
     fn disconnect_during_project_commit_drains_the_upload_without_panicking() {
         let project = TemporaryDirectory::new("disconnect-commit-project");
         let home = TemporaryDirectory::new("disconnect-commit-home");
-        let previews = Arc::new(ProjectPreviewService::new());
+        let previews = Arc::new(ProjectPreviewService::new_for_test());
         let feedback = Arc::new(CanvasFeedbackArtifacts::new(previews).unwrap());
         let integration_slot = Arc::new(Mutex::new(Weak::<PhotoshopIntegration>::new()));
         let callback_slot = Arc::clone(&integration_slot);

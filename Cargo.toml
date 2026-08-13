@@ -20,7 +20,8 @@ futures-core = "0.3.31"
 futures-util = { version = "0.3.31", default-features = false, features = ["async-await", "std"] }
 hyper = "1.10.1"
 hyper-util = { version = "0.1.20", features = ["tokio"] }
-image = { version = "0.25.10", default-features = false, features = ["avif", "jpeg", "png", "tiff", "webp"] }
+image = { version = "0.25.10", default-features = false, features = ["avif", "gif", "jpeg", "png", "tiff", "webp"] }
+imagesize = { version = "0.14.0", default-features = false, features = ["heif"] }
 junction = { version = "2.0.0", default-features = false }
 libc = "0.2.186"
 notify = "8.2.0"
@@ -44,6 +45,7 @@ uuid = { version = "1", features = ["v4"] }
 url = "2.5.8"
 unicode-segmentation = "1.12.0"
 vt100 = "0.16.2"
+windows = { version = "0.61.3", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
 windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Environment", "Win32_System_IO", "Win32_System_Ioctl", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 winreg = "0.55.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }

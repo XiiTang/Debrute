@@ -549,7 +549,7 @@ mod tests {
             let root =
                 std::env::temp_dir().join(format!("debrute-terminal-hub-{}", Uuid::new_v4()));
             std::fs::create_dir_all(&root).expect("Terminal Hub fixture should exist");
-            let previews = Arc::new(ProjectPreviewService::new());
+            let previews = Arc::new(ProjectPreviewService::new_for_test());
             let feedback = Arc::new(
                 CanvasFeedbackArtifacts::new(previews)
                     .expect("Terminal Hub feedback scheduler should start"),

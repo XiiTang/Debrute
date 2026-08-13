@@ -280,6 +280,17 @@ Feedback, and Working Copies; zero successes preserve the revision, while one
 or more successes publish one revision and one Project event. There is no Trash
 identity, undo record, compatibility fallback, or recovery journal.
 
+The HTTP handler dispatches this complete session transaction through one
+blocking task. macOS selects `NSFileManager` explicitly. Windows creates an
+owned `IFileOperation` with no-UI and recycle-on-delete flags and treats a failed
+item admission, failed execution, or reported abort as that item's failure. No
+platform path can fall through to permanent deletion. The explicit Windows host
+probe is `pnpm test:rust:native-trash`; it uses one UUID file and sentinel,
+serializes execution, restores only the exact matching Trash or Recycle Bin
+item, and is not part of ordinary automated tests. The macOS probe predicts the
+UUID item's exact `~/.Trash` path and renames only that item back; the Windows
+probe selects only the Recycle Bin record with the exact original UUID path.
+
 ## Executable Authorities
 
 - Desktop composition and native command execution: `apps/desktop/src/electron/main.ts`.
